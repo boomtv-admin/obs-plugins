@@ -115,6 +115,21 @@ enum obs_source_type {
  */
 #define OBS_SOURCE_DO_NOT_DUPLICATE (1<<7)
 
+/**
+ * Source is deprecated and should not be used
+ */
+#define OBS_SOURCE_DEPRECATED (1<<8)
+
+/**
+ * Source cannot have its audio monitored
+ *
+ * Specifies that this source may cause a feedback loop if audio is monitored
+ * with a device selected as desktop audio.
+ *
+ * This is used primarily with desktop audio capture sources.
+ */
+#define OBS_SOURCE_DO_NOT_SELF_MONITOR (1<<9)
+
 /** @} */
 
 typedef void (*obs_source_enum_proc_t)(obs_source_t *parent,
@@ -158,7 +173,7 @@ struct obs_source_info {
 	 * Creates the source data for the source
 	 *
 	 * @param  settings  Settings to initialize the source with
-	 * @param  source    Source that this data is assoicated with
+	 * @param  source    Source that this data is associated with
 	 * @return           The data associated with this source
 	 */
 	void *(*create)(obs_data_t *settings, obs_source_t *source);
@@ -244,7 +259,7 @@ struct obs_source_info {
 	 * If the source output flags do not include SOURCE_CUSTOM_DRAW, all
 	 * a source needs to do is set the "image" parameter of the effect to
 	 * the desired texture, and then draw.  If the output flags include
-	 * SOURCE_COLOR_MATRIX, you may optionally set the the "color_matrix"
+	 * SOURCE_COLOR_MATRIX, you may optionally set the "color_matrix"
 	 * parameter of the effect to a custom 4x4 conversion matrix (by
 	 * default it will be set to an YUV->RGB conversion matrix)
 	 *
@@ -395,13 +410,28 @@ struct obs_source_info {
 	bool (*audio_render)(void *data, uint64_t *ts_out,
 			struct obs_source_audio_mix *audio_output,
 			uint32_t mixers, size_t channels, size_t sample_rate);
+
+	/**
+	 * Called to enumerate all active and inactive sources being used
+	 * within this source.  If this callback isn't implemented,
+	 * enum_active_sources will be called instead.
+	 *
+	 * This is typically used if a source can have inactive child sources.
+	 *
+	 * @param  data           Filter data
+	 * @param  enum_callback  Enumeration callback
+	 * @param  param          User data to pass to callback
+	 */
+	void (*enum_all_sources)(void *data,
+			obs_source_enum_proc_t enum_callback,
+			void *param);
 };
 
 EXPORT void obs_register_source_s(const struct obs_source_info *info,
 		size_t size);
 
 /**
- * Regsiters a source definition to the current obs context.  This should be
+ * Registers a source definition to the current obs context.  This should be
  * used in obs_module_load.
  *
  * @param  info  Pointer to the source definition structure

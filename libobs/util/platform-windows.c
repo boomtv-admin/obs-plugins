@@ -84,9 +84,24 @@ void *os_dlopen(const char *path)
 	if (wpath_slash)
 		SetDllDirectoryW(NULL);
 
-	if (!h_library)
-		blog(LOG_INFO, "LoadLibrary failed for '%s', error: %ld",
-				path, GetLastError());
+	if (!h_library) {
+		DWORD error = GetLastError();
+		char *message = NULL;
+
+		FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM |
+		               FORMAT_MESSAGE_IGNORE_INSERTS |
+		               FORMAT_MESSAGE_ALLOCATE_BUFFER,
+		               NULL, error,
+		               MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US),
+		               (LPSTR)&message, 0, NULL);
+
+		blog(LOG_INFO, "LoadLibrary failed for '%s': %s (%lu)",
+				path, message, error);
+
+		if (message)
+			LocalFree(message);
+	}
+
 
 	return h_library;
 }
@@ -534,11 +549,42 @@ int os_rename(const char *old_path, const char *new_path)
 		goto error;
 	}
 
-	code = MoveFileW(old_path_utf16, new_path_utf16) ? 0 : -1;
+	code = MoveFileExW(old_path_utf16, new_path_utf16,
+			MOVEFILE_REPLACE_EXISTING) ? 0 : -1;
 
 error:
 	bfree(old_path_utf16);
 	bfree(new_path_utf16);
+	return code;
+}
+
+int os_safe_replace(const char *target, const char *from, const char *backup)
+{
+	wchar_t *wtarget = NULL;
+	wchar_t *wfrom = NULL;
+	wchar_t *wbackup = NULL;
+	int code = -1;
+
+	if (!target || !from)
+		return -1;
+	if (!os_utf8_to_wcs_ptr(target, 0, &wtarget))
+		return -1;
+	if (!os_utf8_to_wcs_ptr(from, 0, &wfrom))
+		goto fail;
+	if (backup && !os_utf8_to_wcs_ptr(backup, 0, &wbackup))
+		goto fail;
+
+	if (ReplaceFileW(wtarget, wfrom, wbackup, 0, NULL, NULL)) {
+		code = 0;
+	} else if (GetLastError() == ERROR_FILE_NOT_FOUND) {
+		code = MoveFileExW(wfrom, wtarget, MOVEFILE_REPLACE_EXISTING)
+			? 0 : -1;
+	}
+
+fail:
+	bfree(wtarget);
+	bfree(wfrom);
+	bfree(wbackup);
 	return code;
 }
 
@@ -704,28 +750,31 @@ bool get_dll_ver(const wchar_t *lib, struct win_version_info *ver_info)
 	BOOL success;
 	LPVOID data;
 	DWORD size;
+	char utf8_lib[512];
 
 	if (!ver_initialized && !initialize_version_functions())
 		return false;
 	if (!ver_initialize_success)
 		return false;
 
+	os_wcs_to_utf8(lib, 0, utf8_lib, sizeof(utf8_lib));
+
 	size = get_file_version_info_size(lib, NULL);
 	if (!size) {
-		blog(LOG_ERROR, "Failed to get windows version info size");
+		blog(LOG_ERROR, "Failed to get %s version info size", utf8_lib);
 		return false;
 	}
 
 	data = bmalloc(size);
-	if (!get_file_version_info(L"kernel32", 0, size, data)) {
-		blog(LOG_ERROR, "Failed to get windows version info");
+	if (!get_file_version_info(lib, 0, size, data)) {
+		blog(LOG_ERROR, "Failed to get %s version info", utf8_lib);
 		bfree(data);
 		return false;
 	}
 
 	success = ver_query_value(data, L"\\", (LPVOID*)&info, &len);
 	if (!success || !info || !len) {
-		blog(LOG_ERROR, "Failed to get windows version info value");
+		blog(LOG_ERROR, "Failed to get %s version info value", utf8_lib);
 		bfree(data);
 		return false;
 	}
@@ -739,6 +788,18 @@ bool get_dll_ver(const wchar_t *lib, struct win_version_info *ver_info)
 	return true;
 }
 
+bool is_64_bit_windows(void)
+{
+#if defined(_WIN64)
+	return true;
+#elif defined(_WIN32)
+	BOOL b64 = false;
+	return IsWow64Process(GetCurrentProcess(), &b64) && b64;
+#endif
+}
+
+#define WINVER_REG_KEY L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"
+
 void get_win_ver(struct win_version_info *info)
 {
 	static struct win_version_info ver = {0};
@@ -750,6 +811,26 @@ void get_win_ver(struct win_version_info *info)
 	if (!got_version) {
 		get_dll_ver(L"kernel32", &ver);
 		got_version = true;
+
+		if (ver.major == 10 && ver.revis == 0) {
+			HKEY    key;
+			DWORD   size, win10_revision;
+			LSTATUS status;
+
+			status = RegOpenKeyW(HKEY_LOCAL_MACHINE,
+					WINVER_REG_KEY, &key);
+			if (status != ERROR_SUCCESS)
+				return;
+
+			size = sizeof(win10_revision);
+
+			status = RegQueryValueExW(key, L"UBR", NULL, NULL,
+					(LPBYTE)&win10_revision, &size);
+			if (status == ERROR_SUCCESS)
+				ver.revis = (int)win10_revision;
+
+			RegCloseKey(key);
+		}
 	}
 
 	*info = ver;
@@ -797,4 +878,84 @@ void os_inhibit_sleep_destroy(os_inhibit_t *info)
 void os_breakpoint(void)
 {
 	__debugbreak();
+}
+
+DWORD num_logical_cores(ULONG_PTR mask)
+{
+	DWORD     left_shift    = sizeof(ULONG_PTR) * 8 - 1;
+	DWORD     bit_set_count = 0;
+	ULONG_PTR bit_test      = (ULONG_PTR)1 << left_shift;
+
+	for (DWORD i = 0; i <= left_shift; ++i) {
+		bit_set_count += ((mask & bit_test) ? 1 : 0);
+		bit_test      /= 2;
+	}
+
+	return bit_set_count;
+}
+
+static int physical_cores = 0;
+static int logical_cores = 0;
+static bool core_count_initialized = false;
+
+static void os_get_cores_internal(void)
+{
+	PSYSTEM_LOGICAL_PROCESSOR_INFORMATION info = NULL, temp = NULL;
+	DWORD len = 0;
+
+	if (core_count_initialized)
+		return;
+
+	core_count_initialized = true;
+
+	GetLogicalProcessorInformation(info, &len);
+	if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+		return;
+
+	info = malloc(len);
+
+	if (GetLogicalProcessorInformation(info, &len)) {
+		DWORD num = len / sizeof(*info);
+		temp = info;
+
+		for (DWORD i = 0; i < num; i++) {
+			if (temp->Relationship == RelationProcessorCore) {
+				ULONG_PTR mask = temp->ProcessorMask;
+
+				physical_cores++;
+				logical_cores += num_logical_cores(mask);
+			}
+
+			temp++;
+		}
+	}
+
+	free(info);
+}
+
+int os_get_physical_cores(void)
+{
+	if (!core_count_initialized)
+		os_get_cores_internal();
+	return physical_cores;
+}
+
+int os_get_logical_cores(void)
+{
+	if (!core_count_initialized)
+		os_get_cores_internal();
+	return logical_cores;
+}
+
+uint64_t os_get_free_disk_space(const char *dir)
+{
+	wchar_t *wdir = NULL;
+	if (!os_utf8_to_wcs_ptr(dir, 0, &wdir))
+		return 0;
+
+	ULARGE_INTEGER free;
+	bool success = !!GetDiskFreeSpaceExW(wdir, &free, NULL, NULL);
+	bfree(wdir);
+
+	return success ? free.QuadPart : 0;
 }

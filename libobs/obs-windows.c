@@ -105,70 +105,28 @@ static void log_processor_info(void)
 	RegCloseKey(key);
 }
 
-static DWORD num_logical_cores(ULONG_PTR mask)
-{
-	DWORD     left_shift    = sizeof(ULONG_PTR) * 8 - 1;
-	DWORD     bit_set_count = 0;
-	ULONG_PTR bit_test      = (ULONG_PTR)1 << left_shift;
-
-	for (DWORD i = 0; i <= left_shift; ++i) {
-		bit_set_count += ((mask & bit_test) ? 1 : 0);
-		bit_test      /= 2;
-	}
-
-	return bit_set_count;
-}
-
 static void log_processor_cores(void)
 {
-	PSYSTEM_LOGICAL_PROCESSOR_INFORMATION info = NULL, temp = NULL;
-	DWORD len = 0;
-
-	GetLogicalProcessorInformation(info, &len);
-	if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
-		return;
-
-	info = malloc(len);
-
-	if (GetLogicalProcessorInformation(info, &len)) {
-		DWORD num            = len / sizeof(*info);
-		int   physical_cores = 0;
-		int   logical_cores  = 0;
-
-		temp = info;
-
-		for (DWORD i = 0; i < num; i++) {
-			if (temp->Relationship == RelationProcessorCore) {
-				ULONG_PTR mask = temp->ProcessorMask;
-
-				physical_cores++;
-				logical_cores += num_logical_cores(mask);
-			}
-
-			temp++;
-		}
-
-		blog(LOG_INFO, "Physical Cores: %d, Logical Cores: %d",
-				physical_cores, logical_cores);
-	}
-
-	free(info);
+	blog(LOG_INFO, "Physical Cores: %d, Logical Cores: %d",
+			os_get_physical_cores(), os_get_logical_cores());
 }
 
 static void log_available_memory(void)
 {
-	MEMORYSTATUS ms;
-	GlobalMemoryStatus(&ms);
+	MEMORYSTATUSEX ms;
+	ms.dwLength = sizeof(ms);
+
+	GlobalMemoryStatusEx(&ms);
 
 #ifdef _WIN64
 	const char *note = "";
 #else
-	const char *note = " (NOTE: 2 or 4 gigs max is normal for 32bit programs)";
+	const char *note = " (NOTE: 32bit programs cannot use more than 3gb)";
 #endif
 
 	blog(LOG_INFO, "Physical Memory: %luMB Total, %luMB Free%s",
-			(DWORD)(ms.dwTotalPhys / 1048576),
-			(DWORD)(ms.dwAvailPhys / 1048576),
+			(DWORD)(ms.ullTotalPhys / 1048576),
+			(DWORD)(ms.ullAvailPhys / 1048576),
 			note);
 }
 
@@ -177,8 +135,31 @@ static void log_windows_version(void)
 	struct win_version_info ver;
 	get_win_ver(&ver);
 
-	blog(LOG_INFO, "Windows Version: %d.%d Build %d (revision: %d)",
-			ver.major, ver.minor, ver.build, ver.revis);
+	bool b64 = is_64_bit_windows();
+	const char *windows_bitness = b64 ? "64" : "32";
+
+	blog(LOG_INFO, "Windows Version: %d.%d Build %d (revision: %d; %s-bit)",
+			ver.major, ver.minor, ver.build, ver.revis,
+			windows_bitness);
+}
+
+static void log_admin_status(void)
+{
+	SID_IDENTIFIER_AUTHORITY auth = SECURITY_NT_AUTHORITY;
+	PSID admin_group;
+	BOOL success;
+
+	success = AllocateAndInitializeSid(&auth, 2,
+			SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS,
+			0, 0, 0, 0, 0, 0, &admin_group);
+	if (success) {
+		if (!CheckTokenMembership(NULL, admin_group, &success))
+			success = false;
+		FreeSid(admin_group);
+	}
+
+	blog(LOG_INFO, "Running as administrator: %s",
+			success ? "true" : "false");
 }
 
 typedef HRESULT (WINAPI *dwm_is_composition_enabled_t)(BOOL*);
@@ -219,6 +200,7 @@ void log_system_info(void)
 	log_processor_cores();
 	log_available_memory();
 	log_windows_version();
+	log_admin_status();
 	log_aero();
 }
 

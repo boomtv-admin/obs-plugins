@@ -519,11 +519,14 @@ EXPORT uint8_t *gs_create_texture_file_data(const char *file,
  * Draws a 2D sprite
  *
  *   If width or height is 0, the width or height of the texture will be used.
- * The flip value specifies whether the texture shoudl be flipped on the U or V
+ * The flip value specifies whether the texture should be flipped on the U or V
  * axis with GS_FLIP_U and GS_FLIP_V.
  */
 EXPORT void gs_draw_sprite(gs_texture_t *tex, uint32_t flip, uint32_t width,
 		uint32_t height);
+
+EXPORT void gs_draw_sprite_subregion(gs_texture_t *tex, uint32_t flip,
+		uint32_t x, uint32_t y, uint32_t cx, uint32_t cy);
 
 EXPORT void gs_draw_cube_backdrop(gs_texture_t *cubetex, const struct quat *rot,
 		float left, float right, float top, float bottom, float znear);
@@ -531,7 +534,7 @@ EXPORT void gs_draw_cube_backdrop(gs_texture_t *cubetex, const struct quat *rot,
 /** sets the viewport to current swap chain size */
 EXPORT void gs_reset_viewport(void);
 
-/** sets default screen-sized orthographich mode */
+/** sets default screen-sized orthographic mode */
 EXPORT void gs_set_2d_mode(void);
 /** sets default screen-sized perspective mode */
 EXPORT void gs_set_3d_mode(double fovy, double znear, double zvar);

@@ -108,7 +108,7 @@ static struct obs_encoder *create_encoder(const char *id,
 			&obs->data.encoders_mutex,
 			&obs->data.first_encoder);
 
-	blog(LOG_INFO, "encoder '%s' (%s) created", name, id);
+	blog(LOG_DEBUG, "encoder '%s' (%s) created", name, id);
 	return encoder;
 }
 
@@ -229,7 +229,7 @@ static void obs_encoder_actually_destroy(obs_encoder_t *encoder)
 		da_free(encoder->outputs);
 		pthread_mutex_unlock(&encoder->outputs_mutex);
 
-		blog(LOG_INFO, "encoder '%s' destroyed", encoder->context.name);
+		blog(LOG_DEBUG, "encoder '%s' destroyed", encoder->context.name);
 
 		free_audio_buffers(encoder);
 
@@ -796,7 +796,7 @@ static inline void do_encode(struct obs_encoder *encoder,
 		full_stop(encoder);
 		blog(LOG_ERROR, "Error encoding with encoder '%s'",
 				encoder->context.name);
-		return;
+		goto error;
 	}
 
 	if (received) {
@@ -822,6 +822,7 @@ static inline void do_encode(struct obs_encoder *encoder,
 		pthread_mutex_unlock(&encoder->callbacks_mutex);
 	}
 
+error:
 	profile_end(do_encode_name);
 }
 
@@ -1034,17 +1035,55 @@ void obs_encoder_remove_output(struct obs_encoder *encoder,
 	pthread_mutex_unlock(&encoder->outputs_mutex);
 }
 
+void obs_encoder_packet_create_instance(struct encoder_packet *dst,
+		const struct encoder_packet *src)
+{
+	long *p_refs;
+
+	*dst = *src;
+	p_refs = bmalloc(src->size + sizeof(long));
+	dst->data = (void*)(p_refs + 1);
+	*p_refs = 1;
+	memcpy(dst->data, src->data, src->size);
+}
+
 void obs_duplicate_encoder_packet(struct encoder_packet *dst,
 		const struct encoder_packet *src)
 {
-	*dst = *src;
-	dst->data = bmemdup(src->data, src->size);
+	obs_encoder_packet_create_instance(dst, src);
 }
 
 void obs_free_encoder_packet(struct encoder_packet *packet)
 {
-	bfree(packet->data);
-	memset(packet, 0, sizeof(struct encoder_packet));
+	obs_encoder_packet_release(packet);
+}
+
+void obs_encoder_packet_ref(struct encoder_packet *dst,
+		struct encoder_packet *src)
+{
+	if (!src)
+		return;
+
+	if (src->data) {
+		long *p_refs = ((long*)src->data) - 1;
+		os_atomic_inc_long(p_refs);
+	}
+
+	*dst = *src;
+}
+
+void obs_encoder_packet_release(struct encoder_packet *pkt)
+{
+	if (!pkt)
+		return;
+
+	if (pkt->data) {
+		long *p_refs = ((long*)pkt->data) - 1;
+		if (os_atomic_dec_long(p_refs) == 0)
+			bfree(p_refs);
+	}
+
+	memset(pkt, 0, sizeof(struct encoder_packet));
 }
 
 void obs_encoder_set_preferred_video_format(obs_encoder_t *encoder,

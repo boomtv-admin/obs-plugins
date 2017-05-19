@@ -32,6 +32,8 @@
 #include "rtmp_sys.h"
 #include "log.h"
 
+#include <util/platform.h>
+
 #ifdef CRYPTO
 
 #ifdef __APPLE__
@@ -650,7 +652,7 @@ int RTMP_AddStream(RTMP *r, const char *playpath)
 }
 
 static int
-add_addr_info(struct sockaddr_storage *service, socklen_t *addrlen, AVal *host, int port)
+add_addr_info(struct sockaddr_storage *service, socklen_t *addrlen, AVal *host, int port, socklen_t addrlen_hint, int *socket_error)
 {
     char *hostname;
     int ret = TRUE;
@@ -691,14 +693,15 @@ add_addr_info(struct sockaddr_storage *service, socklen_t *addrlen, AVal *host, 
 #define gai_strerrorA gai_strerror
 #endif
         RTMP_Log(RTMP_LOGERROR, "Could not resolve %s: %s (%d)", hostname, gai_strerrorA(GetSockError()), GetSockError());
+        *socket_error = GetSockError();
         ret = FALSE;
         goto finish;
     }
 
-    // they should come back in OS preferred order
+    // prefer ipv4 results, since lots of ISPs have broken ipv6 connectivity
     for (ptr = result; ptr != NULL; ptr = ptr->ai_next)
     {
-        if (ptr->ai_family == AF_INET || ptr->ai_family == AF_INET6)
+        if (ptr->ai_family == AF_INET && (!addrlen_hint || ptr->ai_addrlen == addrlen_hint))
         {
             memcpy(service, ptr->ai_addr, ptr->ai_addrlen);
             *addrlen = (socklen_t)ptr->ai_addrlen;
@@ -706,10 +709,30 @@ add_addr_info(struct sockaddr_storage *service, socklen_t *addrlen, AVal *host, 
         }
     }
 
+    if (!*addrlen)
+    {
+        for (ptr = result; ptr != NULL; ptr = ptr->ai_next)
+        {
+            if (ptr->ai_family == AF_INET6 && (!addrlen_hint || ptr->ai_addrlen == addrlen_hint))
+            {
+                memcpy(service, ptr->ai_addr, ptr->ai_addrlen);
+                *addrlen = (socklen_t)ptr->ai_addrlen;
+                break;
+            }
+        }
+    }
+
     freeaddrinfo(result);
 
     if (service->ss_family == AF_UNSPEC || *addrlen == 0)
     {
+        // since we're handling multiple addresses internally, fake the correct error response
+#ifdef _WIN32
+        *socket_error = WSANO_DATA;
+#else
+        *socket_error = ENODATA;
+#endif
+
         RTMP_Log(RTMP_LOGERROR, "Could not resolve server '%s': no valid address found", hostname);
         ret = FALSE;
         goto finish;
@@ -755,10 +778,13 @@ RTMP_Connect0(RTMP *r, struct sockaddr * service, socklen_t addrlen)
                 int err = GetSockError();
                 RTMP_Log(RTMP_LOGERROR, "%s, failed to bind socket: %s (%d)",
                          __FUNCTION__, socketerror(err), err);
+                r->last_error_code = err;
                 RTMP_Close(r);
                 return FALSE;
             }
         }
+
+        uint64_t connect_start = os_gettime_ns();
 
         if (connect(r->m_sb.sb_socket, service, addrlen) < 0)
         {
@@ -772,9 +798,12 @@ RTMP_Connect0(RTMP *r, struct sockaddr * service, socklen_t addrlen)
             else
                 RTMP_Log(RTMP_LOGERROR, "%s, failed to connect socket: %s (%d)",
                      __FUNCTION__, socketerror(err), err);
+            r->last_error_code = err;
             RTMP_Close(r);
             return FALSE;
         }
+
+        r->connect_time_ms = (int)((os_gettime_ns() - connect_start) / 1000000);
 
         if (r->Link.socksport)
         {
@@ -892,6 +921,9 @@ RTMP_Connect(RTMP *r, RTMPPacket *cp)
 #endif
     struct sockaddr_storage service;
     socklen_t addrlen = 0;
+    socklen_t addrlen_hint = 0;
+    int socket_error = 0;
+
     if (!r->Link.hostname.av_len)
         return FALSE;
 
@@ -900,6 +932,7 @@ RTMP_Connect(RTMP *r, RTMPPacket *cp)
     h = gethostbyname("localhost");
     if (!h && GetLastError() == WSAHOST_NOT_FOUND)
     {
+        r->last_error_code = WSAHOST_NOT_FOUND;
         RTMP_Log(RTMP_LOGERROR, "RTMP_Connect: Connection test failed. This error is likely caused by Comodo Internet Security running OBS in sandbox mode. Please add OBS to the Comodo automatic sandbox exclusion list, restart OBS and try again (11001).");
         return FALSE;
     }
@@ -907,17 +940,26 @@ RTMP_Connect(RTMP *r, RTMPPacket *cp)
 
     memset(&service, 0, sizeof(service));
 
+    if (r->m_bindIP.addrLen)
+        addrlen_hint = r->m_bindIP.addrLen;
+
     if (r->Link.socksport)
     {
         /* Connect via SOCKS */
-        if (!add_addr_info(&service, &addrlen, &r->Link.sockshost, r->Link.socksport))
+        if (!add_addr_info(&service, &addrlen, &r->Link.sockshost, r->Link.socksport, addrlen_hint, &socket_error))
+        {
+            r->last_error_code = socket_error;
             return FALSE;
+        }
     }
     else
     {
         /* Connect directly */
-        if (!add_addr_info(&service, &addrlen, &r->Link.hostname, r->Link.port))
+        if (!add_addr_info(&service, &addrlen, &r->Link.hostname, r->Link.port, addrlen_hint, &socket_error))
+        {
+            r->last_error_code = socket_error;
             return FALSE;
+        }
     }
 
     if (!RTMP_Connect0(r, (struct sockaddr *)&service, addrlen))
@@ -934,9 +976,10 @@ SocksNegotiate(RTMP *r)
     unsigned long addr;
     struct sockaddr_storage service;
     socklen_t addrlen = 0;
+    int socket_error = 0;
     memset(&service, 0, sizeof(service));
 
-    add_addr_info(&service, &addrlen, &r->Link.hostname, r->Link.port);
+    add_addr_info(&service, &addrlen, &r->Link.hostname, r->Link.port, 0, &socket_error);
 
     // not doing IPv6 socks
     if (service.ss_family == AF_INET6)
@@ -1418,6 +1461,8 @@ WriteN(RTMP *r, const char *buffer, int n)
 
             if (sockerr == EINTR && !RTMP_ctrlC)
                 continue;
+
+            r->last_error_code = sockerr;
 
             RTMP_Close(r);
             n = 1;
@@ -3091,7 +3136,10 @@ HandleInvoke(RTMP *r, const char *body, unsigned int nBodySize)
     {
         RTMP_Log(RTMP_LOGERROR, "rtmp server requested close");
         RTMP_Close(r);
-#if defined(CRYPTO) || defined(USE_ONLY_MD5)
+
+        // disabled this for now, if the server sends an rtmp close message librtmp
+        // will enter an infinite loop here until stack is exhausted.
+#if 0 && (defined(CRYPTO) || defined(USE_ONLY_MD5))
         if ((r->Link.protocol & RTMP_FEATURE_WRITE) &&
                 !(r->Link.pFlags & RTMP_PUB_CLEAN) &&
                 (  !(r->Link.pFlags & RTMP_PUB_NAME) ||
@@ -4231,6 +4279,11 @@ RTMP_Close(RTMP *r)
         r->Link.tcUrl.av_val = NULL;
         r->Link.lFlags ^= RTMP_LF_FTCU;
     }
+
+    memset (&r->m_bindIP, 0, sizeof(r->m_bindIP));
+    r->m_bCustomSend = 0;
+    r->m_customSendFunc = NULL;
+    r->m_customSendParam = NULL;
 
 #if defined(CRYPTO) || defined(USE_ONLY_MD5)
     if (!(r->Link.protocol & RTMP_FEATURE_WRITE) || (r->Link.pFlags & RTMP_PUB_CLEAN))

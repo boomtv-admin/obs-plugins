@@ -24,18 +24,14 @@
 #define UNUSED_PARAMETER(param) (void)param
 
 #ifdef _MSC_VER
-#define DEPRECATED_START __declspec(deprecated)
-#define DEPRECATED_END
+#define DEPRECATED __declspec(deprecated)
 #define FORCE_INLINE __forceinline
 #else
-#define DEPRECATED_START
-#define DEPRECATED_END __attribute__ ((deprecated))
+#define DEPRECATED __attribute__ ((deprecated))
 #define FORCE_INLINE inline __attribute__((always_inline))
 #endif
 
 #ifdef _MSC_VER
-
-#pragma warning (disable : 4996)
 
 /* Microsoft is one of the most inept companies on the face of the planet.
  * The fact that even visual studio 2013 doesn't support the standard 'inline'
@@ -43,7 +39,7 @@
  * incredibly inept moron could possibly be managing the visual C compiler
  * project.  They should be fired, and legally forbidden to have a job in
  * ANYTHING even REMOTELY related to programming.  FOREVER.  This should also
- * apply to the next 10 generations all of their descendents. */
+ * apply to the next 10 generations all of their descendants. */
 #ifndef __cplusplus
 #define inline __inline
 #endif

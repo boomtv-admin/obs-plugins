@@ -23,6 +23,7 @@
 #include <obs-avc.h>
 
 #include <libavutil/opt.h>
+#include <libavutil/pixdesc.h>
 #include <libavformat/avformat.h>
 
 #include "obs-ffmpeg-formats.h"
@@ -54,6 +55,7 @@ struct nvenc_encoder {
 
 	int                            height;
 	bool                           first_packet;
+	bool                           initialized;
 };
 
 static const char *nvenc_getname(void *unused)
@@ -113,6 +115,8 @@ static bool nvenc_init_codec(struct nvenc_encoder *enc)
 		return false;
 	}
 
+	enc->initialized = true;
+
 	*((AVPicture*)enc->vframe) = enc->dst_picture;
 	return true;
 }
@@ -138,6 +142,7 @@ static bool nvenc_update(void *data, obs_data_t *settings)
 	bool twopass = obs_data_get_bool(settings, "2pass");
 	int gpu = (int)obs_data_get_int(settings, "gpu");
 	bool cbr_override = obs_data_get_bool(settings, "cbr");
+	int bf = (int)obs_data_get_int(settings, "bf");
 
 	video_t *video = obs_encoder_video(enc->encoder);
 	const struct video_output_info *voi = video_output_get_info(video);
@@ -153,13 +158,17 @@ static bool nvenc_update(void *data, obs_data_t *settings)
 		rc = "CBR";
 	}
 
+	/* The "default" preset has been deprecated */
+	if (preset && astrcmpi(preset, "default") == 0)
+		preset = "hq";
+
 	info.format = voi->format;
 	info.colorspace = voi->colorspace;
 	info.range = voi->range;
 
 	nvenc_video_info(enc, &info);
 	av_opt_set_int(enc->context->priv_data, "cbr", false, 0);
-
+	av_opt_set(enc->context->priv_data, "profile", profile, 0);
 	av_opt_set(enc->context->priv_data, "preset", preset, 0);
 
 	if (astrcmpi(rc, "cqp") == 0) {
@@ -198,6 +207,7 @@ static bool nvenc_update(void *data, obs_data_t *settings)
 		AVCOL_SPC_BT709 : AVCOL_SPC_BT470BG;
 	enc->context->color_range = info.range == VIDEO_RANGE_FULL ?
 		AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
+	enc->context->max_b_frames = bf;
 
 	if (keyint_sec)
 		enc->context->gop_size = keyint_sec * voi->fps_num /
@@ -218,11 +228,13 @@ static bool nvenc_update(void *data, obs_data_t *settings)
 	     "\twidth:        %d\n"
 	     "\theight:       %d\n"
 	     "\t2-pass:       %s\n"
+	     "\tb-frames:     %d\n"
 	     "\tGPU:          %d\n",
 	     rc, bitrate, cqp, enc->context->gop_size,
 	     preset, profile, level,
 	     enc->context->width, enc->context->height,
 	     twopass ? "true" : "false",
+	     enc->context->max_b_frames,
 	     gpu);
 
 	return nvenc_init_codec(enc);
@@ -231,6 +243,20 @@ static bool nvenc_update(void *data, obs_data_t *settings)
 static void nvenc_destroy(void *data)
 {
 	struct nvenc_encoder *enc = data;
+
+	if (enc->initialized) {
+		AVPacket pkt = {0};
+		int r_pkt = 1;
+
+		while (r_pkt) {
+			if (avcodec_encode_video2(enc->context, &pkt, NULL,
+						&r_pkt) < 0)
+				break;
+
+			if (r_pkt)
+				av_free_packet(&pkt);
+		}
+	}
 
 	avcodec_close(enc->context);
 	av_frame_free(&enc->vframe);
@@ -250,7 +276,9 @@ static void *nvenc_create(obs_data_t *settings, obs_encoder_t *encoder)
 
 	enc = bzalloc(sizeof(*enc));
 	enc->encoder = encoder;
-	enc->nvenc = avcodec_find_encoder_by_name("nvenc_h264");
+	enc->nvenc = avcodec_find_encoder_by_name("h264_nvenc");
+	if (!enc->nvenc)
+		enc->nvenc = avcodec_find_encoder_by_name("nvenc_h264");
 	enc->first_packet = true;
 
 	blog(LOG_INFO, "---------------------------------");
@@ -277,8 +305,10 @@ fail:
 }
 
 static inline void copy_data(AVPicture *pic, const struct encoder_frame *frame,
-		int height)
+		int height, enum AVPixelFormat format)
 {
+	int h_chroma_shift, v_chroma_shift;
+	av_pix_fmt_get_chroma_sub_sample(format, &h_chroma_shift, &v_chroma_shift);
 	for (int plane = 0; plane < MAX_AV_PLANES; plane++) {
 		if (!frame->data[plane])
 			continue;
@@ -287,7 +317,7 @@ static inline void copy_data(AVPicture *pic, const struct encoder_frame *frame,
 		int pic_rowsize   = pic->linesize[plane];
 		int bytes = frame_rowsize < pic_rowsize ?
 			frame_rowsize : pic_rowsize;
-		int plane_height = plane == 0 ? height : height/2;
+		int plane_height = height >> (plane ? v_chroma_shift : 0);
 
 		for (int y = 0; y < plane_height; y++) {
 			int pos_frame = y * frame_rowsize;
@@ -310,7 +340,7 @@ static bool nvenc_encode(void *data, struct encoder_frame *frame,
 
 	av_init_packet(&av_pkt);
 
-	copy_data(&enc->dst_picture, frame, enc->height);
+	copy_data(&enc->dst_picture, frame, enc->height, enc->context->pix_fmt);
 
 	enc->vframe->pts = frame->pts;
 	ret = avcodec_encode_video2(enc->context, &av_pkt, enc->vframe,
@@ -358,11 +388,12 @@ static void nvenc_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "keyint_sec", 0);
 	obs_data_set_default_int(settings, "cqp", 23);
 	obs_data_set_default_string(settings, "rate_control", "CBR");
-	obs_data_set_default_string(settings, "preset", "default");
+	obs_data_set_default_string(settings, "preset", "hq");
 	obs_data_set_default_string(settings, "profile", "main");
 	obs_data_set_default_string(settings, "level", "auto");
 	obs_data_set_default_bool(settings, "2pass", true);
 	obs_data_set_default_int(settings, "gpu", 0);
+	obs_data_set_default_int(settings, "bf", 2);
 }
 
 static bool rate_control_modified(obs_properties_t *ppts, obs_property_t *p,
@@ -421,7 +452,6 @@ static obs_properties_t *nvenc_properties(void *unused)
 #define add_preset(val) \
 	obs_property_list_add_string(p, obs_module_text("NVENC.Preset." val), \
 			val)
-	add_preset("default");
 	add_preset("hq");
 	add_preset("hp");
 	add_preset("bd");
@@ -471,6 +501,9 @@ static obs_properties_t *nvenc_properties(void *unused)
 	obs_properties_add_bool(props, "2pass",
 			obs_module_text("NVENC.Use2Pass"));
 	obs_properties_add_int(props, "gpu", obs_module_text("GPU"), 0, 8, 1);
+
+	obs_properties_add_int(props, "bf", obs_module_text("BFrames"),
+			0, 4, 1);
 
 	return props;
 }

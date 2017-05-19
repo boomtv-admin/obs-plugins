@@ -62,13 +62,16 @@ endif()
 set(obs-outputs_HEADERS
 	obs-output-ver.h
 	rtmp-helpers.h
+	rtmp-stream.h
 	net-if.h
 	flv-mux.h
 	flv-output.h
 	librtmp)
 set(obs-outputs_SOURCES
 	obs-outputs.c
+	null-output.c
 	rtmp-stream.c
+	rtmp-windows.c
 	flv-output.c
 	flv-mux.c
 	net-if.c)

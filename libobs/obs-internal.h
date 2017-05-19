@@ -140,8 +140,8 @@ struct obs_hotkey_pair {
 	obs_hotkey_pair_id          pair_id;
 	obs_hotkey_id               id[2];
 	obs_hotkey_active_func      func[2];
-	bool                        pressed0 : 1;
-	bool                        pressed1 : 1;
+	bool                        pressed0;
+	bool                        pressed1;
 	void                        *data[2];
 };
 
@@ -166,8 +166,8 @@ void obs_hotkeys_free(void);
 
 struct obs_hotkey_binding {
 	obs_key_combination_t       key;
-	bool                        pressed : 1;
-	bool                        modifiers_match : 1;
+	bool                        pressed;
+	bool                        modifiers_match;
 
 	obs_hotkey_id               hotkey_id;
 	obs_hotkey_t                *hotkey;
@@ -199,6 +199,7 @@ struct obs_display {
 	uint32_t                        background_color;
 	gs_swapchain_t                  *swap;
 	pthread_mutex_t                 draw_callbacks_mutex;
+	pthread_mutex_t                 draw_info_mutex;
 	DARRAY(struct draw_callback)    draw_callbacks;
 
 	struct obs_display              *next;
@@ -243,6 +244,8 @@ struct obs_core_video {
 	int                             cur_texture;
 
 	uint64_t                        video_time;
+	uint64_t                        video_avg_frame_time_ns;
+	double                          video_fps;
 	video_t                         *video;
 	pthread_t                       video_thread;
 	uint32_t                        total_frames;
@@ -273,10 +276,13 @@ struct obs_core_video {
 	gs_effect_t                     *deinterlace_blend_2x_effect;
 	gs_effect_t                     *deinterlace_yadif_effect;
 	gs_effect_t                     *deinterlace_yadif_2x_effect;
+
+	struct obs_video_info           ovi;
 };
 
+struct audio_monitor;
+
 struct obs_core_audio {
-	/* TODO: sound output subsystem */
 	audio_t                         *audio;
 
 	DARRAY(struct obs_source*)      render_order;
@@ -288,6 +294,11 @@ struct obs_core_audio {
 	int                             total_buffering_ticks;
 
 	float                           user_volume;
+
+	pthread_mutex_t                 monitoring_mutex;
+	DARRAY(struct audio_monitor*)   monitors;
+	char                            *monitoring_device_name;
+	char                            *monitoring_device_id;
 };
 
 /* user sources, output channels, and displays */
@@ -305,6 +316,8 @@ struct obs_core_data {
 	pthread_mutex_t                 encoders_mutex;
 	pthread_mutex_t                 services_mutex;
 	pthread_mutex_t                 audio_sources_mutex;
+	pthread_mutex_t                 draw_callbacks_mutex;
+	DARRAY(struct draw_callback)    draw_callbacks;
 
 	struct obs_view                 main_view;
 
@@ -324,9 +337,9 @@ struct obs_core_hotkeys {
 	pthread_t                       hotkey_thread;
 	bool                            hotkey_thread_initialized;
 	os_event_t                      *stop_event;
-	bool                            thread_disable_press : 1;
-	bool                            strict_modifiers : 1;
-	bool                            reroute_hotkeys : 1;
+	bool                            thread_disable_press;
+	bool                            strict_modifiers;
+	bool                            reroute_hotkeys;
 	DARRAY(obs_hotkey_binding_t)    bindings;
 
 	obs_hotkey_callback_router_func router_func;
@@ -544,6 +557,7 @@ struct obs_source {
 	volatile bool                   timing_set;
 	volatile uint64_t               timing_adjust;
 	uint64_t                        resample_offset;
+	uint64_t                        last_audio_ts;
 	uint64_t                        next_audio_ts_min;
 	uint64_t                        next_audio_sys_ts_min;
 	uint64_t                        last_frame_ts;
@@ -553,6 +567,7 @@ struct obs_source {
 	/* audio */
 	bool                            audio_failed;
 	bool                            audio_pending;
+	bool                            pending_stop;
 	bool                            user_muted;
 	bool                            muted;
 	struct obs_source               *next_audio_source;
@@ -592,6 +607,9 @@ struct obs_source {
 	int                             async_plane_offset[2];
 	bool                            async_flip;
 	bool                            async_active;
+	bool                            async_update_texture;
+	bool                            async_unbuffered;
+	struct obs_source_frame         *async_preload_frame;
 	DARRAY(struct async_frame)      async_cache;
 	DARRAY(struct obs_source_frame*)async_frames;
 	pthread_mutex_t                 async_mutex;
@@ -627,12 +645,12 @@ struct obs_source {
 	obs_hotkey_pair_id              mute_unmute_key;
 	obs_hotkey_id                   push_to_mute_key;
 	obs_hotkey_id                   push_to_talk_key;
-	bool                            push_to_mute_enabled : 1;
-	bool                            push_to_mute_pressed : 1;
-	bool                            user_push_to_mute_pressed : 1;
-	bool                            push_to_talk_enabled : 1;
-	bool                            push_to_talk_pressed : 1;
-	bool                            user_push_to_talk_pressed : 1;
+	bool                            push_to_mute_enabled;
+	bool                            push_to_mute_pressed;
+	bool                            user_push_to_mute_pressed;
+	bool                            push_to_talk_enabled;
+	bool                            push_to_talk_pressed;
+	bool                            user_push_to_talk_pressed;
 	uint64_t                        push_to_mute_delay;
 	uint64_t                        push_to_mute_stop_time;
 	uint64_t                        push_to_talk_delay;
@@ -654,10 +672,13 @@ struct obs_source {
 	uint32_t                        transition_cx;
 	uint32_t                        transition_cy;
 	uint32_t                        transition_fixed_duration;
-	bool                            transition_use_fixed_duration : 1;
+	bool                            transition_use_fixed_duration;
 	enum obs_transition_mode        transition_mode;
 	enum obs_transition_scale_type  transition_scale_type;
 	struct matrix4                  transition_matrices[2];
+
+	struct audio_monitor            *monitor;
+	enum obs_monitoring_type        monitoring_type;
 };
 
 extern const struct obs_source_info *get_source_info(const char *id);
@@ -675,6 +696,10 @@ extern void obs_transition_enum_sources(obs_source_t *transition,
 		obs_source_enum_proc_t enum_callback, void *param);
 extern void obs_transition_save(obs_source_t *source, obs_data_t *data);
 extern void obs_transition_load(obs_source_t *source, obs_data_t *data);
+
+struct audio_monitor *audio_monitor_create(obs_source_t *source);
+void audio_monitor_reset(struct audio_monitor *monitor);
+extern void audio_monitor_destroy(struct audio_monitor *monitor);
 
 extern void obs_source_destroy(struct obs_source *source);
 
@@ -716,8 +741,6 @@ static inline enum gs_color_format convert_video_format(
 		return GS_RGBA;
 	else if (format == VIDEO_FORMAT_BGRA)
 		return GS_BGRA;
-	else if (format == VIDEO_FORMAT_Y800)
-		return GS_R8;
 
 	return GS_BGRX;
 }
@@ -772,6 +795,13 @@ struct obs_weak_output {
 	struct obs_output *output;
 };
 
+#define CAPTION_LINE_CHARS (32)
+#define CAPTION_LINE_BYTES (4*CAPTION_LINE_CHARS)
+struct caption_text {
+	char text[CAPTION_LINE_BYTES+1];
+	struct caption_text *next;
+};
+
 struct obs_output {
 	struct obs_context_data         context;
 	struct obs_output_info          info;
@@ -806,7 +836,6 @@ struct obs_output {
 	uint32_t                        starting_drawn_count;
 	uint32_t                        starting_lagged_count;
 	uint32_t                        starting_frame_count;
-	uint32_t                        starting_skipped_frame_count;
 
 	int                             total_frames;
 
@@ -826,6 +855,11 @@ struct obs_output {
 	struct video_scale_info         video_conversion;
 	struct audio_convert_info       audio_conversion;
 
+	pthread_mutex_t                 caption_mutex;
+	double                          caption_timestamp;
+	struct caption_text             *caption_head;
+	struct caption_text             *caption_tail;
+
 	bool                            valid;
 
 	uint64_t                        active_delay_ns;
@@ -838,6 +872,8 @@ struct obs_output {
 	volatile long                   delay_restart_refs;
 	volatile bool                   delay_active;
 	volatile bool                   delay_capturing;
+
+	char                            *last_error_message;
 };
 
 static inline void do_output_signal(struct obs_output *output,
@@ -862,6 +898,8 @@ extern const struct obs_output_info *find_output(const char *id);
 extern void obs_output_remove_encoder(struct obs_output *output,
 		struct obs_encoder *encoder);
 
+extern void obs_encoder_packet_create_instance(struct encoder_packet *dst,
+		const struct encoder_packet *src);
 void obs_output_destroy(obs_output_t *output);
 
 

@@ -116,6 +116,7 @@ public:
 	inline ~Decoder() {ffmpeg_decode_free(&decode);}
 
 	inline operator ffmpeg_decode*() {return &decode;}
+	inline ffmpeg_decode *operator->() {return &decode;}
 };
 
 class CriticalSection {
@@ -207,8 +208,14 @@ struct DShowInput {
 		if (!thread)
 			throw "Failed to create thread";
 
+		deactivateWhenNotShowing =
+			obs_data_get_bool(settings, DEACTIVATE_WNS);
+
 		if (obs_data_get_bool(settings, "active")) {
-			QueueAction(Action::Activate);
+			bool showing = obs_source_showing(source);
+			if (!deactivateWhenNotShowing || showing)
+				QueueAction(Action::Activate);
+
 			active = true;
 		}
 	}
@@ -509,21 +516,30 @@ void DShowInput::OnEncodedAudioData(enum AVCodecID id,
 		}
 	}
 
-	bool got_output;
-	int len = ffmpeg_decode_audio(audio_decoder, data, size,
-			&audio, &got_output);
-	if (len < 0) {
-		blog(LOG_WARNING, "Error decoding audio");
-		return;
-	}
+	do {
+		bool got_output;
+		int len = ffmpeg_decode_audio(audio_decoder, data, size,
+				&audio, &got_output);
+		if (len < 0) {
+			blog(LOG_WARNING, "Error decoding audio");
+			return;
+		}
 
-	if (got_output) {
-		audio.timestamp = (uint64_t)ts * 100;
+		if (got_output) {
+			audio.timestamp = (uint64_t)ts * 100;
 #if LOG_ENCODED_AUDIO_TS
-		blog(LOG_DEBUG, "audio ts: %llu", audio.timestamp);
+			blog(LOG_DEBUG, "audio ts: %llu", audio.timestamp);
 #endif
-		obs_source_output_audio(source, &audio);
-	}
+			obs_source_output_audio(source, &audio);
+		} else {
+			break;
+		}
+
+		ts += int64_t(audio_decoder->frame->nb_samples) * 10000000LL /
+			int64_t(audio_decoder->frame->sample_rate);
+		size -= (size_t)len;
+		data += len;
+	} while (size > 0);
 }
 
 void DShowInput::OnAudioData(const AudioConfig &config,
@@ -737,12 +753,7 @@ inline void DShowInput::SetupBuffering(obs_data_t *settings)
 	else
 		useBuffering = bufType == BufferingType::On;
 
-	if (useBuffering)
-		flags &= ~OBS_SOURCE_FLAG_UNBUFFERED;
-	else
-		flags |= OBS_SOURCE_FLAG_UNBUFFERED;
-
-	obs_source_set_flags(source, flags);
+	obs_source_set_async_unbuffered(source, !useBuffering);
 }
 
 static DStr GetVideoFormatName(VideoFormat format);
@@ -1793,6 +1804,9 @@ static obs_properties_t *GetDShowProperties(void *obj)
 			(int64_t)BufferingType::On);
 	obs_property_list_add_int(p, TEXT_BUFFERING_OFF,
 			(int64_t)BufferingType::Off);
+
+	obs_property_set_long_description(p,
+			obs_module_text("Buffering.ToolTip"));
 
 	obs_properties_add_bool(ppts, FLIP_IMAGE, TEXT_FLIP_IMAGE);
 

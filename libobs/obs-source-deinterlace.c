@@ -27,7 +27,7 @@ static bool ready_deinterlace_frames(obs_source_t *source, uint64_t sys_time)
 	uint64_t frame_offset = 0;
 	size_t idx = 1;
 
-	if ((source->flags & OBS_SOURCE_FLAG_UNBUFFERED) != 0) {
+	if (source->async_unbuffered) {
 		while (source->async_frames.num > 2) {
 			da_erase(source->async_frames, 0);
 			remove_async_frame(source, next_frame);
@@ -37,6 +37,7 @@ static bool ready_deinterlace_frames(obs_source_t *source, uint64_t sys_time)
 		if (source->async_frames.num == 2)
 			source->async_frames.array[0]->prev_frame = true;
 		source->deinterlace_offset = 0;
+		source->last_frame_ts = next_frame->timestamp;
 		return true;
 	}
 
