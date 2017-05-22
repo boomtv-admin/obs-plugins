@@ -11,6 +11,10 @@ set(get-graphics-offsets_SOURCES
 	d3d8-offsets.cpp
 	d3d9-offsets.cpp)
 
+if(MSVC)
+	add_compile_options("$<$<CONFIG:RelWithDebInfo>:/MT>")
+endif()
+
 add_executable(get-graphics-offsets
 	${get-graphics-offsets_SOURCES}
 	${get-graphics-offsets_HEADERS})
@@ -30,4 +34,4 @@ set_target_properties(get-graphics-offsets
 	PROPERTIES
 		OUTPUT_NAME "get-graphics-offsets${_output_suffix}")
 
-install_obs_datatarget(get-graphics-offsets "obs-plugins/boom-capture")
+install_obs_datatarget(get-graphics-offsets "obs-plugins/win-capture")

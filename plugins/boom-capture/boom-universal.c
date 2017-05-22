@@ -18,9 +18,11 @@
 #include "inject-library.h"
 #include "graphics-hook-info.h"
 #include "window-helpers.h"
+#include "app-helpers.h"
 #include "cursor-capture.h"
 #include "dc-capture.h"
 #include "cJSON.h"
+#include "nt-stuff.h"
 
 
 
@@ -126,12 +128,18 @@ struct bcu {
 	HANDLE                        keep_alive;
 	HANDLE                        hook_restart;
 	HANDLE                        hook_stop;
+	HANDLE                        hook_init;
 	HANDLE                        hook_ready;
 	HANDLE                        hook_exit;
 	HANDLE                        hook_data_map;
 	HANDLE                        global_hook_info_map;
 	HANDLE                        target_process;
 	HANDLE                        texture_mutexes[2];
+	wchar_t                       *app_sid;
+
+	bool                          is_app;
+
+	int retrying;
 
 	gs_effect_t					  *solid;
 	gs_eparam_t					  *color;
@@ -160,11 +168,60 @@ struct bcu {
 struct graphics_offsets offsets32 = { 0 };
 struct graphics_offsets offsets64 = { 0 };
 
+static inline bool use_anticheat(struct bcu *gc)
+{
+	return gc->config.anticheat_hook && !gc->is_app;
+}
 
+static inline HANDLE open_mutex_plus_id(struct bcu *gc,
+	const wchar_t *name, DWORD id)
+{
+	wchar_t new_name[64];
+	_snwprintf(new_name, 64, L"%s%lu", name, id);
+	return gc->is_app
+		? open_app_mutex(gc->app_sid, new_name)
+		: open_mutex(new_name);
+}
 
+static inline HANDLE open_mutex_gc(struct bcu *gc,
+	const wchar_t *name)
+{
+	return open_mutex_plus_id(gc, name, gc->process_id);
+}
 
+static inline HANDLE open_event_plus_id(struct bcu *gc,
+	const wchar_t *name, DWORD id)
+{
+	wchar_t new_name[64];
+	_snwprintf(new_name, 64, L"%s%lu", name, id);
+	return gc->is_app
+		? open_app_event(gc->app_sid, new_name)
+		: open_event(new_name);
+}
 
+static inline HANDLE open_event_gc(struct bcu *gc,
+	const wchar_t *name)
+{
+	return open_event_plus_id(gc, name, gc->process_id);
+}
 
+static inline HANDLE open_map_plus_id(struct bcu *gc,
+	const wchar_t *name, DWORD id)
+{
+	wchar_t new_name[64];
+	_snwprintf(new_name, 64, L"%s%lu", name, id);
+
+	debug("map id: %S", new_name);
+
+	return gc->is_app
+		? open_app_map(gc->app_sid, new_name)
+		: OpenFileMappingW(GC_MAPPING_FLAGS, false, new_name);
+}
+
+static inline HANDLE open_hook_info(struct bcu *gc)
+{
+	return open_map_plus_id(gc, SHMEM_HOOK_INFO, gc->process_id);
+}
 
 //===============================================  Initialize functions  ===============================================
 
@@ -490,13 +547,13 @@ void bcu_init(void *data)
 	//MessageBox(NULL, (LPCWSTR)L"BoomApp is not running. Please start BoomApp before start playing game!", (LPCWSTR)L"Warning", MB_SYSTEMMODAL | MB_OK | MB_ICONWARNING);
 	
 	// Find BoomApp window
-	char* classname = bzalloc(255 * sizeof(char));
-	strcpy(classname, "Boom Replay");
-	if (!find_window(INCLUDE_MINIMIZED, classname))
+	char* title = bzalloc(255 * sizeof(char));
+	strcpy(title, "Boom Replay");
+	if (!find_window(INCLUDE_MINIMIZED, WINDOW_PRIORITY_TITLE, "", title, ""))
 	{
 		MessageBoxA(NULL, "Heads up, for Boom Replay to work properly the app must be running before you start the game.", "Warning", MB_SYSTEMMODAL | MB_OK | MB_ICONWARNING);
 	}
-	bfree(classname);
+	bfree(title);
 
 	struct bcu *gc = data;
 	struct obs_scene * scene = bcu_get_scene(data);
@@ -990,16 +1047,19 @@ static inline bool is_64bit_process(HANDLE process)
 
 static inline bool open_target_process(struct bcu *gc)
 {
-	if (bcu_assert("open_target_process", gc) == false) return false;
-
-	gc->target_process = open_process(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, gc->process_id);
-	if (!gc->target_process)
-	{
+	gc->target_process = open_process(
+		PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
+		false, gc->process_id);
+	if (!gc->target_process) {
 		warn("could not open process: %s", gc->config.title_first);
 		return false;
 	}
 
 	gc->process_is_64bit = is_64bit_process(gc->target_process);
+	gc->is_app = is_app(gc->target_process);
+	if (gc->is_app) {
+		gc->app_sid = get_app_sid(gc->target_process);
+	}
 	return true;
 }
 
@@ -1008,12 +1068,13 @@ static inline bool open_target_process(struct bcu *gc)
 
 static inline bool init_keepalive(struct bcu *gc)
 {
-	if (bcu_assert("init_keepalive", gc) == false) return false;
-
-	gc->keep_alive = create_event_id(false, false, EVENT_HOOK_KEEPALIVE,
+	wchar_t new_name[64];
+	_snwprintf(new_name, 64, L"%s%lu", WINDOW_HOOK_KEEPALIVE,
 		gc->process_id);
+
+	gc->keep_alive = CreateMutexW(NULL, false, new_name);
 	if (!gc->keep_alive) {
-		warn("failed to create keepalive event");
+		warn("Failed to create keepalive mutex: %lu", GetLastError());
 		return false;
 	}
 
@@ -1023,16 +1084,37 @@ static inline bool init_keepalive(struct bcu *gc)
 
 
 
+//Returns the last Win32 error, in string format. Returns an empty string if there is no error.
+char* GetLastErrorAsString()
+{
+	char* buf = malloc(256);
+	FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM, 0, GetLastError(),
+		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), buf, 256, 0);
+
+	return buf;
+}
+
+
+
 static inline bool init_texture_mutexes(struct bcu *gc)
 {
-	if (bcu_assert("init_texture_mutexes", gc) == false) return false;
+	gc->texture_mutexes[0] = open_mutex_gc(gc, MUTEX_TEXTURE1);
+	gc->texture_mutexes[1] = open_mutex_gc(gc, MUTEX_TEXTURE2);
 
-	gc->texture_mutexes[0] = get_mutex_plus_id(MUTEX_TEXTURE1, gc->process_id);
-	gc->texture_mutexes[1] = get_mutex_plus_id(MUTEX_TEXTURE2, gc->process_id);
+	if (!gc->texture_mutexes[0] || !gc->texture_mutexes[1]) {
+		DWORD error = GetLastError();
 
-	if (!gc->texture_mutexes[0] || !gc->texture_mutexes[1])
-	{
-		warn("failed to create texture mutexes: %lu", GetLastError());
+		info("init_texture_mutexes failing: %i %i %i %s", gc->texture_mutexes[0], gc->texture_mutexes[1], error, GetLastErrorAsString());
+		if (error == 2) {
+			if (!gc->retrying) {
+				gc->retrying = 2;
+				info("hook not loaded yet, retrying..");
+			}
+		}
+		else {
+			warn("failed to open texture mutexes: %lu",
+				GetLastErrorAsString());
+		}
 		return false;
 	}
 
@@ -1047,7 +1129,17 @@ static inline bool attempt_existing_hook(struct bcu *gc)
 {
 	if (bcu_assert("attempt_existing_hook", gc) == false) return false;
 
-	gc->hook_restart = open_event_id(EVENT_CAPTURE_RESTART, gc->process_id);
+	gc->hook_restart = open_event_gc(gc, EVENT_CAPTURE_RESTART);
+	if (gc->hook_restart) {
+		debug("existing hook found, signaling process: %s",
+			gc->config.title_first);
+		SetEvent(gc->hook_restart);
+		return true;
+	}
+
+	return false;
+
+	/*gc->hook_restart = open_event_id(EVENT_CAPTURE_RESTART, gc->process_id);
 	if (gc->hook_restart)
 	{
 		debug("existing hook found, signaling process: %s", gc->config.title_first);
@@ -1055,7 +1147,7 @@ static inline bool attempt_existing_hook(struct bcu *gc)
 		return true;
 	}
 
-	return false;
+	return false;*/
 }
 
 
@@ -1089,7 +1181,7 @@ static inline bool init_hook_info(struct bcu *gc)
 {
 	if (bcu_assert("init_hook_info", gc) == false) return false;
 
-	gc->global_hook_info_map = get_hook_info(gc->process_id);
+	gc->global_hook_info_map = open_hook_info(gc);
 	if (!gc->global_hook_info_map) {
 		warn("init_hook_info: get_hook_info failed: %lu",
 			GetLastError());
@@ -1105,27 +1197,59 @@ static inline bool init_hook_info(struct bcu *gc)
 		return false;
 	}
 
-
 	gc->global_hook_info->offsets = gc->process_is_64bit ?
 		offsets64 : offsets32;
 	gc->global_hook_info->capture_overlay = gc->config.capture_overlays;
 	gc->global_hook_info->force_shmem = gc->config.force_shmem;
 	gc->global_hook_info->use_scale = false;
-	//gc->global_hook_info->cx = 960;
-	//gc->global_hook_info->cy = 540;
 	reset_frame_interval(gc);
 
 	obs_enter_graphics();
-	if (!gs_shared_texture_available())
+	if (!gs_shared_texture_available()) {
+		warn("init_hook_info: shared texture capture unavailable");
 		gc->global_hook_info->force_shmem = true;
-	obs_leave_graphics();
-
-	obs_enter_graphics();
-	if (!gs_shared_texture_available())
-		gc->global_hook_info->force_shmem = true;
+	}
 	obs_leave_graphics();
 
 	return true;
+
+	//gc->global_hook_info_map = create_hook_info(gc->process_id);
+	//if (!gc->global_hook_info_map) {
+	//	warn("init_hook_info: get_hook_info failed: %lu",
+	//		GetLastError());
+	//	return false;
+	//}
+
+	//gc->global_hook_info = MapViewOfFile(gc->global_hook_info_map,
+	//	FILE_MAP_ALL_ACCESS, 0, 0,
+	//	sizeof(*gc->global_hook_info));
+	//if (!gc->global_hook_info) {
+	//	warn("init_hook_info: failed to map data view: %lu",
+	//		GetLastError());
+	//	return false;
+	//}
+
+
+	//gc->global_hook_info->offsets = gc->process_is_64bit ?
+	//	offsets64 : offsets32;
+	//gc->global_hook_info->capture_overlay = gc->config.capture_overlays;
+	//gc->global_hook_info->force_shmem = gc->config.force_shmem;
+	//gc->global_hook_info->use_scale = false;
+	////gc->global_hook_info->cx = 960;
+	////gc->global_hook_info->cy = 540;
+	//reset_frame_interval(gc);
+
+	//obs_enter_graphics();
+	//if (!gs_shared_texture_available())
+	//	gc->global_hook_info->force_shmem = true;
+	//obs_leave_graphics();
+
+	//obs_enter_graphics();
+	//if (!gs_shared_texture_available())
+	//	gc->global_hook_info->force_shmem = true;
+	//obs_leave_graphics();
+
+	//return true;
 }
 
 
@@ -1287,12 +1411,12 @@ static inline bool inject_hook(struct bcu *gc)
 	matching_architecture = !gc->process_is_64bit;
 #endif
 
-	if (matching_architecture && !gc->config.anticheat_hook) {
+	if (matching_architecture && !use_anticheat(gc)) {
 		info("using direct hook");
 		success = hook_direct(gc, hook_path);
 	}
 	else {
-		info("using helper (%s hook)", gc->config.anticheat_hook ?
+		info("using helper (%s hook)", use_anticheat(gc) ?
 			"compatibility" : "direct");
 		success = create_inject_process(gc, inject_path, hook_dll);
 	}
@@ -1305,10 +1429,116 @@ cleanup:
 
 
 
+static inline bool init_events(struct bcu *gc)
+{
+	if (!gc->hook_restart) {
+		gc->hook_restart = open_event_gc(gc, EVENT_CAPTURE_RESTART);
+		if (!gc->hook_restart) {
+			warn("init_events: failed to get hook_restart "
+				"event: %lu", GetLastError());
+			return false;
+		}
+	}
+
+	if (!gc->hook_stop) {
+		gc->hook_stop = open_event_gc(gc, EVENT_CAPTURE_STOP);
+		if (!gc->hook_stop) {
+			warn("init_events: failed to get hook_stop event: %lu",
+				GetLastError());
+			return false;
+		}
+	}
+
+	if (!gc->hook_init) {
+		gc->hook_init = open_event_gc(gc, EVENT_HOOK_INIT);
+		if (!gc->hook_init) {
+			warn("init_events: failed to get hook_init event: %lu",
+				GetLastError());
+			return false;
+		}
+	}
+
+	if (!gc->hook_ready) {
+		gc->hook_ready = open_event_gc(gc, EVENT_HOOK_READY);
+		if (!gc->hook_ready) {
+			warn("init_events: failed to get hook_ready event: %lu",
+				GetLastError());
+			return false;
+		}
+	}
+
+	if (!gc->hook_exit) {
+		gc->hook_exit = open_event_gc(gc, EVENT_HOOK_EXIT);
+		if (!gc->hook_exit) {
+			warn("init_events: failed to get hook_exit event: %lu",
+				GetLastError());
+			return false;
+		}
+	}
+
+	return true;
+}
+
+static bool target_suspended(struct bcu *gc)
+{
+	return thread_is_suspended(gc->process_id, gc->thread_id);
+}
 
 static bool init_hook(struct bcu *gc)
 {
-	info("attempting to hook process: %s", gc->config.title_first);
+	struct dstr exe = { 0 };
+
+	if (get_window_exe(&exe, gc->next_window)) {
+		info("attempting to hook process: %s %i", exe.array, gc->is_app);
+	}
+	else {
+		info("unable to attempt hook: %s", exe.array);
+	}
+	dstr_free(&exe);
+
+	if (target_suspended(gc)) {
+		info("target_suspended failed: %s", exe.array);
+		return false;
+	}
+	if (!open_target_process(gc)) {
+		info("open_target_process failed: %s", exe.array);
+		return false;
+	}
+	if (!init_keepalive(gc)) {
+		info("init_keepalive failed: %s", exe.array);
+		return false;
+	}
+	if (!init_pipe(gc)) {
+		info("init_pipe failed: %s", exe.array);
+		return false;
+	}
+	if (!attempt_existing_hook(gc)) {
+		if (!inject_hook(gc)) {
+			info("inject_hook failed: %s", exe.array);
+			return false;
+		}
+	}
+	if (!init_texture_mutexes(gc)) {
+		info("init_texture_mutexes failed: %s", exe.array);
+		return false;
+	}
+	if (!init_hook_info(gc)) {
+		info("init_hook_info failed: %s", exe.array);
+		return false;
+	}
+	if (!init_events(gc)) {
+		info("init_events failed: %s", exe.array);
+		return false;
+	}
+
+	SetEvent(gc->hook_init);
+
+	gc->window = gc->next_window;
+	gc->next_window = NULL;
+	gc->active = true;
+	gc->retrying = 0;
+	return true;
+	/*info("attempting to hook process: %s", gc->config.title_first);
 
 	if (!open_target_process(gc)) {
 		return false;
@@ -1334,7 +1564,7 @@ static bool init_hook(struct bcu *gc)
 	gc->window = gc->next_window;
 	gc->next_window = NULL;
 	gc->active = true;
-	return true;
+	return true;*/
 }
 
 
@@ -1405,13 +1635,16 @@ static void get_selected_window(struct bcu *gc)
 	}
 	else 
 	{
-		if (window = find_window(INCLUDE_MINIMIZED, gc->config.title_first))
+		if (window = find_window(INCLUDE_MINIMIZED, WINDOW_PRIORITY_TITLE, "", gc->config.title_first, ""))
 		{
 			gc->use2D = false;
+
+			blog(LOG_WARNING, "get_selected_window is 3D");
 		}
-		else if (window = find_window(INCLUDE_MINIMIZED, gc->config.title_second))
+		else if (window = find_window(INCLUDE_MINIMIZED, WINDOW_PRIORITY_TITLE, "", gc->config.title_second, ""))
 		{
 			gc->use2D = true;
+			blog(LOG_WARNING, "get_selected_window is 2D");
 		}
 	}
 
@@ -1440,8 +1673,9 @@ static void try_hook(struct bcu *gc)
 		gc->thread_id = GetWindowThreadProcessId(gc->next_window, &gc->process_id);
 
 		// Make sure we never try to hook ourselves (projector)
-		if (gc->process_id == GetCurrentProcessId())
+		if (gc->process_id == GetCurrentProcessId()) {
 			return;
+		}
 
 		if (!gc->thread_id || !gc->process_id) {
 			warn("error acquiring, failed to get window "
@@ -1458,55 +1692,6 @@ static void try_hook(struct bcu *gc)
 	else {
 		gc->active = false;
 	}
-}
-
-
-
-
-static inline bool init_events(struct bcu *gc)
-{
-	if (!gc->hook_restart) {
-		gc->hook_restart = get_event_plus_id(EVENT_CAPTURE_RESTART,
-			gc->process_id);
-		bcu_set_scale(gc);
-		if (!gc->hook_restart) {
-			warn("init_events: failed to get hook_restart "
-				"event: %lu", GetLastError());
-			return false;
-		}
-	}
-
-	if (!gc->hook_stop) {
-		gc->hook_stop = get_event_plus_id(EVENT_CAPTURE_STOP,
-			gc->process_id);
-		if (!gc->hook_stop) {
-			warn("init_events: failed to get hook_stop event: %lu",
-				GetLastError());
-			return false;
-		}
-	}
-
-	if (!gc->hook_ready) {
-		gc->hook_ready = get_event_plus_id(EVENT_HOOK_READY,
-			gc->process_id);
-		if (!gc->hook_ready) {
-			warn("init_events: failed to get hook_ready event: %lu",
-				GetLastError());
-			return false;
-		}
-	}
-
-	if (!gc->hook_exit) {
-		gc->hook_exit = get_event_plus_id(EVENT_HOOK_EXIT,
-			gc->process_id);
-		if (!gc->hook_exit) {
-			warn("init_events: failed to get hook_exit event: %lu",
-				GetLastError());
-			return false;
-		}
-	}
-
-	return true;
 }
 
 
@@ -1946,6 +2131,7 @@ static inline bool is_valid(void *data)
 static void bcu_tick(void *data, float seconds)
 {
 	if (bcu_assert("bcu_tick", data) == false) return;
+	//blog(LOG_WARNING, "bcu_tick");
 
 	struct bcu *gc = data;
 	RECT rect;
@@ -1977,7 +2163,7 @@ static void bcu_tick(void *data, float seconds)
 
 		if (gc->active && !gc->hook_ready && gc->process_id)
 		{
-			gc->hook_ready = get_event_plus_id(EVENT_HOOK_READY, gc->process_id);
+			gc->hook_ready = create_event_plus_id(EVENT_HOOK_READY, gc->process_id);
 		}
 
 		if (gc->injector_process && object_signalled(gc->injector_process))
@@ -2073,59 +2259,59 @@ static void bcu_tick(void *data, float seconds)
 	}
 	else
 	{
-		//If source not showing skip tick
+		blog(LOG_WARNING, "bcu_tick_2D 00");
 		if (!obs_source_showing(gc->source))
 			return;
 
-
-		//If we do no find window yet
-		if (!gc->window || !IsWindow(gc->window) || !is_valid(data))
-		{
+		blog(LOG_WARNING, "bcu_tick_2D 01");
+		if (!gc->window || !IsWindow(gc->window) || !is_valid(data)) {
+			blog(LOG_WARNING, "bcu_tick_2D 02");
 			if (!gc->config.title_second)
 				return;
 
-			gc->window = find_window(INCLUDE_MINIMIZED, gc->config.title_second);
-			if (!gc->window)
-			{
-				blog(LOG_INFO, "Not found window!!!!");
+			blog(LOG_WARNING, "bcu_tick_2D 03");
+			gc->window = find_window(INCLUDE_MINIMIZED, WINDOW_PRIORITY_TITLE, "", gc->config.title_second, "");
+			blog(LOG_WARNING, "bcu_tick_2D 04 %s %i", gc->config.title_second, gc->window);
+			if (!gc->window) {
+				blog(LOG_WARNING, "bcu_tick_2D 05");
 				if (gc->capture.valid)
 					dc_capture_free(&gc->capture);
 				gc->use2D = false;
 				return;
 			}
-			else
-			{
-				blog(LOG_INFO, "We find a window!!!!");
-				bcu_set_scale(data);
-			}
 
 			reset_capture = true;
 
 		}
-		else if (IsIconic(gc->window))
-		{
+		else if (IsIconic(gc->window)) {
 			return;
 		}
 
+		//gc->cursor_check_time += seconds;
+		//if (wc->cursor_check_time > CURSOR_CHECK_TIME) {
+		//	DWORD foreground_pid, target_pid;
 
-		//Start view
+		//	// Can't just compare the window handle in case of app with child windows
+		//	if (!GetWindowThreadProcessId(GetForegroundWindow(), &foreground_pid))
+		//		foreground_pid = 0;
+
+		//	if (!GetWindowThreadProcessId(wc->window, &target_pid))
+		//		target_pid = 0;
+
+		//	if (foreground_pid && target_pid && foreground_pid != target_pid)
+		//		wc->capture.cursor_hidden = true;
+		//	else
+		//		wc->capture.cursor_hidden = false;
+
+		//	wc->cursor_check_time = 0.0f;
+		//}
+
 		obs_enter_graphics();
+		blog(LOG_WARNING, "bcu_tick_2D 06");
 
-
-		//Set initial settings
-		if (!gc->started)
-		{
-			//Init
-			bcu_init(data);
-
-
-			//Enable start flag
-			gc->started = true;
-		}
-
-
-		//Get window size and update window
 		GetClientRect(gc->window, &rect);
+
+		blog(LOG_WARNING, "bcu_tick_2D 07");
 		if (!reset_capture) {
 			gc->resize_timer += seconds;
 
@@ -2138,16 +2324,92 @@ static void bcu_tick(void *data, float seconds)
 			}
 		}
 
-		if (reset_capture)
-		{
+		blog(LOG_WARNING, "bcu_tick_2D 08");
+		if (reset_capture) {
 			gc->resize_timer = 0.0f;
 			gc->last_rect = rect;
 			dc_capture_free(&gc->capture);
-			dc_capture_init(&gc->capture, 0, 0, rect.right, rect.bottom, gc->config.cursor, false);
+			dc_capture_init(&gc->capture, 0, 0, rect.right, rect.bottom,
+				gc->config.cursor, false);
+			blog(LOG_WARNING, "bcu_tick_2D 09 %i %i", rect.right, rect.bottom);
 		}
 
 		dc_capture_capture(&gc->capture, gc->window);
+		blog(LOG_WARNING, "bcu_tick_2D 10");
 		obs_leave_graphics();
+
+		////If source not showing skip tick
+		//if (!obs_source_showing(gc->source))
+		//	return;
+
+
+		////If we do no find window yet
+		//if (!gc->window || !IsWindow(gc->window) || !is_valid(data))
+		//{
+		//	if (!gc->config.title_second)
+		//		return;
+
+		//	gc->window = find_window(INCLUDE_MINIMIZED, gc->config.title_second);
+		//	if (!gc->window)
+		//	{
+		//		blog(LOG_INFO, "Not found window!!!!");
+		//		if (gc->capture.valid)
+		//			dc_capture_free(&gc->capture);
+		//		gc->use2D = false;
+		//		return;
+		//	}
+		//	else
+		//	{
+		//		blog(LOG_INFO, "We find a window!!!!");
+		//		bcu_set_scale(data);
+		//	}
+
+		//	reset_capture = true;
+
+		//}
+		//else if (IsIconic(gc->window))
+		//{
+		//	return;
+		//}
+
+
+		////Start view
+		//obs_enter_graphics();
+
+		////Set initial settings
+		//if (!gc->started)
+		//{
+		//	//Init
+		//	bcu_init(data);
+
+		//	//Enable start flag
+		//	gc->started = true;
+		//}
+
+		////Get window size and update window
+		//GetClientRect(gc->window, &rect);
+		//if (!reset_capture) {
+		//	gc->resize_timer += seconds;
+
+		//	if (gc->resize_timer >= RESIZE_CHECK_TIME) {
+		//		if (rect.bottom != gc->last_rect.bottom ||
+		//			rect.right != gc->last_rect.right)
+		//			reset_capture = true;
+
+		//		gc->resize_timer = 0.0f;
+		//	}
+		//}
+
+		//if (reset_capture)
+		//{
+		//	gc->resize_timer = 0.0f;
+		//	gc->last_rect = rect;
+		//	dc_capture_free(&gc->capture);
+		//	dc_capture_init(&gc->capture, 0, 0, rect.right, rect.bottom, gc->config.cursor, false);
+		//}
+
+		//dc_capture_capture(&gc->capture, gc->window);
+		//obs_leave_graphics();
 	}
 }
 

@@ -90,3 +90,5 @@ plugins/enc-amf/
 plugins/obs-browser/
 
 plugins/obs-vst/
+
+plugins/boom-capture/graphics-hook/graphics-hook-config\.h\.in

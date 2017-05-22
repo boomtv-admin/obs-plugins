@@ -7,6 +7,7 @@ set(boom-capture_HEADERS
 	cursor-capture.h
 	graphics-hook-info.h
 	window-helpers.h
+	app-helpers.h
 	cJSON.h
 	dc-capture.h)
 
@@ -16,6 +17,7 @@ set(boom-capture_SOURCES
 	cursor-capture.c
 	game-capture.c
 	window-helpers.c
+	app-helpers.c
 	load-graphics-offsets.c
 	plugin-main.c
 	vr-window-capture.c
