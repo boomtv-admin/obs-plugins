@@ -494,7 +494,7 @@ void bcu_init(void *data)
 	strcpy(classname, "Boom Replay");
 	if (!find_window(INCLUDE_MINIMIZED, classname))
 	{
-		MessageBoxA(NULL, "Heads up, for Boom Replay to work properly the app must be running before you start the game.", "Warning", MB_SYSTEMMODAL | MB_OK | MB_ICONWARNING);
+		MessageBoxA(NULL, "Boom Replay is not running. Please start Boom Replay before OBS!", "Warning", MB_SYSTEMMODAL | MB_OK | MB_ICONWARNING);
 	}
 	bfree(classname);
 
