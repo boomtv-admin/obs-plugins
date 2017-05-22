@@ -1497,37 +1497,37 @@ static bool init_hook(struct bcu *gc)
 	dstr_free(&exe);
 
 	if (target_suspended(gc)) {
-		info("target_suspended failed: %s", exe.array);
+		info("target_suspended failed");
 		return false;
 	}
 	if (!open_target_process(gc)) {
-		info("open_target_process failed: %s", exe.array);
+		info("open_target_process failed");
 		return false;
 	}
 	if (!init_keepalive(gc)) {
-		info("init_keepalive failed: %s", exe.array);
+		info("init_keepalive failed");
 		return false;
 	}
 	if (!init_pipe(gc)) {
-		info("init_pipe failed: %s", exe.array);
+		info("init_pipe failed");
 		return false;
 	}
 	if (!attempt_existing_hook(gc)) {
 		if (!inject_hook(gc)) {
-			info("inject_hook failed: %s", exe.array);
+			info("inject_hook failed");
 			return false;
 		}
 	}
 	if (!init_texture_mutexes(gc)) {
-		info("init_texture_mutexes failed: %s", exe.array);
+		info("init_texture_mutexes failed");
 		return false;
 	}
 	if (!init_hook_info(gc)) {
-		info("init_hook_info failed: %s", exe.array);
+		info("init_hook_info failed");
 		return false;
 	}
 	if (!init_events(gc)) {
-		info("init_events failed: %s", exe.array);
+		info("init_events failed");
 		return false;
 	}
 
@@ -1538,33 +1538,6 @@ static bool init_hook(struct bcu *gc)
 	gc->active = true;
 	gc->retrying = 0;
 	return true;
-	/*info("attempting to hook process: %s", gc->config.title_first);
-
-	if (!open_target_process(gc)) {
-		return false;
-	}
-	if (!init_keepalive(gc)) {
-		return false;
-	}
-	if (!init_texture_mutexes(gc)) {
-		return false;
-	}
-	if (!init_hook_info(gc)) {
-		return false;
-	}
-	if (!init_pipe(gc)) {
-		return false;
-	}
-	if (!attempt_existing_hook(gc)) {
-		if (!inject_hook(gc)) {
-			return false;
-		}
-	}
-
-	gc->window = gc->next_window;
-	gc->next_window = NULL;
-	gc->active = true;
-	return true;*/
 }
 
 
@@ -1686,6 +1659,7 @@ static void try_hook(struct bcu *gc)
 		}
 
 		if (!init_hook(gc)) {
+			info("try_hook init_hook failed, stopping capture");
 			stop_capture(gc);
 		}
 	}

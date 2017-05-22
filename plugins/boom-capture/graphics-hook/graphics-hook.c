@@ -137,7 +137,7 @@ static inline bool init_mutexes(void)
 	}
 
 
-	hlog("XXXXXXXXXXXX graphics_hook init_mutexes result: %s %i %s %i", MUTEX_TEXTURE1, tex_mutexes[0], MUTEX_TEXTURE2, tex_mutexes[1]);
+	hlog("graphics_hook init_mutexes result: %s %i %s %i", MUTEX_TEXTURE1, tex_mutexes[0], MUTEX_TEXTURE2, tex_mutexes[1]);
 	return true;
 }
 
@@ -792,19 +792,19 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID unused1)
 			DbgOut("Failed to get current thread handle");
 
 		if (!init_signals()) {
-			hlog("XXXXXXXXXXXX graphics_hook failed init_signals");
+			hlog("graphics_hook failed init_signals");
 			return false;
 		}
 		if (!init_system_path()) {
-			hlog("XXXXXXXXXXXX graphics_hook failed init_system_path");
+			hlog("graphics_hook failed init_system_path");
 			return false;
 		}
 		if (!init_hook_info()) {
-			hlog("XXXXXXXXXXXX graphics_hook failed init_hook_info");
+			hlog("graphics_hook failed init_hook_info");
 			return false;
 		}
 		if (!init_mutexes()) {
-			hlog("XXXXXXXXXXXX graphics_hook failed init_mutexes");
+			hlog("graphics_hook failed init_mutexes");
 			return false;
 		}
 
@@ -817,11 +817,11 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID unused1)
 				(LPTHREAD_START_ROUTINE)main_capture_thread,
 				(LPVOID)cur_thread, 0, 0);
 		if (!capture_thread) {
-			hlog("XXXXXXXXXXXX graphics_hook failed capture_thread");
+			hlog("graphics_hook failed capture_thread");
 			CloseHandle(cur_thread);
 			return false;
 		}
-		hlog("XXXXXXXXXXXX graphics_hook SUCCESS");
+		hlog("graphics_hook SUCCESS");
 
 	} else if (reason == DLL_PROCESS_DETACH) {
 		if (capture_thread) {
