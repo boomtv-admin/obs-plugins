@@ -138,6 +138,8 @@ struct bcu {
 	wchar_t                       *app_sid;
 
 	bool                          is_app;
+	float                         cursor_check_time;
+	bool                          cursor_hidden;
 
 	int retrying;
 
@@ -830,41 +832,42 @@ static inline bool capture_needs_reset(struct bcu_config *cfg1, struct bcu_confi
 // Module update
 static void bcu_update(void *data, obs_data_t *settings)
 {
+	struct bcu *gc = data;
+	struct bcu_config cfg;
+	info("XXXXXXXXXXXXXX bcu_update: %i %i", (int)data, settings);
+
 	if (bcu_assert("bcu_update", data) == false) return;
 	if (bcu_assert("bcu_update", settings) == false) return;
 
-	struct bcu *gc = data;
-	struct bcu_config cfg;
 
 	if (!gc->use2D)
 	{
+		info("XXXXXXXXXXXXXX bcu_update 3D");
 		bool reset_capture = false;
 
 		get_config(&cfg, settings);
 		reset_capture = capture_needs_reset(&cfg, &gc->config);
 
 		gc->error_acquiring = false;
+		gc->activate_hook = true;
 
 		free_config(&gc->config);
 		gc->config = cfg;
-		gc->activate_hook = true;
 		gc->retry_interval = DEFAULT_RETRY_INTERVAL;
 		gc->wait_for_target_startup = false;
 
-		if (!gc->initial_config)
-		{
-			if (reset_capture)
-			{
+		if (!gc->initial_config) {
+			if (reset_capture) {
 				stop_capture(gc);
 			}
 		}
-		else
-		{
+		else {
 			gc->initial_config = false;
 		}
 	}
 	else
 	{
+		info("XXXXXXXXXXXXX bcu_update 2D");
 		gc->window = NULL;
 	}
 }
@@ -1682,9 +1685,6 @@ enum capture_result {
 
 static inline enum capture_result init_capture_data(struct bcu *gc)
 {
-	char name[64];
-	sprintf(name, "%s%u", SHMEM_TEXTURE, gc->global_hook_info->map_id);
-
 	gc->cx = gc->global_hook_info->cx;
 	gc->cy = gc->global_hook_info->cy;
 	gc->pitch = gc->global_hook_info->pitch;
@@ -1696,7 +1696,8 @@ static inline enum capture_result init_capture_data(struct bcu *gc)
 
 	CloseHandle(gc->hook_data_map);
 
-	gc->hook_data_map = OpenFileMappingA(FILE_MAP_ALL_ACCESS, false, name);
+	gc->hook_data_map = open_map_plus_id(gc, SHMEM_TEXTURE,
+		gc->global_hook_info->map_id);
 	if (!gc->hook_data_map) {
 		DWORD error = GetLastError();
 		if (error == 2) {
@@ -1993,6 +1994,8 @@ static inline bool init_shmem_capture(struct bcu *gc)
 {
 	enum gs_color_format format;
 
+	info("XXXXXXXXXXXXXX init_shmem_capture");
+
 	gc->texture_buffers[0] =
 		(uint8_t*)gc->data + gc->shmem_data->tex1_offset;
 	gc->texture_buffers[1] =
@@ -2019,9 +2022,10 @@ static inline bool init_shmem_capture(struct bcu *gc)
 
 
 
-
 static inline bool init_shtex_capture(struct bcu *gc)
 {
+	info("XXXXXXXXXXXXXX init_shtex_capture");
+
 	obs_enter_graphics();
 	gs_texture_destroy(gc->texture);
 	gc->texture = gs_texture_open_shared(gc->shtex_data->tex_handle);
@@ -2040,16 +2044,20 @@ static inline bool init_shtex_capture(struct bcu *gc)
 
 static bool start_capture(struct bcu *gc)
 {
+	info("XXXXXXXXXXXXXXXXXXXX start_capture");
 	if (!init_events(gc)) {
+		warn("start_capture init_events failed");
 		return false;
 	}
 	if (gc->global_hook_info->type == CAPTURE_TYPE_MEMORY) {
 		if (!init_shmem_capture(gc)) {
+			warn("start_capture init_shmem_capture failed");
 			return false;
 		}
 	}
 	else {
 		if (!init_shtex_capture(gc)) {
+			warn("start_capture init_shtex_capture failed");
 			return false;
 		}
 	}
@@ -2099,13 +2107,27 @@ static inline bool is_valid(void *data)
 }
 
 
-
+static void check_foreground_window(struct bcu *gc, float seconds)
+{
+	// Hides the cursor if the user isn't actively in the game
+	gc->cursor_check_time += seconds;
+	if (gc->cursor_check_time >= 0.1f) {
+		DWORD foreground_process_id;
+		GetWindowThreadProcessId(GetForegroundWindow(),
+			&foreground_process_id);
+		if (gc->process_id != foreground_process_id)
+			gc->cursor_hidden = true;
+		else
+			gc->cursor_hidden = false;
+		gc->cursor_check_time = 0.0f;
+	}
+}
 
 // Module item tick
 static void bcu_tick(void *data, float seconds)
 {
 	if (bcu_assert("bcu_tick", data) == false) return;
-	//blog(LOG_WARNING, "bcu_tick");
+	blog(LOG_WARNING, "bcu_tick");
 
 	struct bcu *gc = data;
 	RECT rect;
@@ -2114,34 +2136,60 @@ static void bcu_tick(void *data, float seconds)
 
 	if (!gc->use2D)
 	{
-		if (!obs_source_showing(gc->source))
-		{
+		/*bool deactivate = os_atomic_set_bool(&gc->deactivate_hook, false);
+		bool activate_now = os_atomic_set_bool(&gc->activate_hook_now, false);
+
+		if (activate_now) {
+			HWND hwnd = (HWND)os_atomic_load_long(&gc->hotkey_window);
+
+			if (is_uwp_window(hwnd))
+				hwnd = get_uwp_actual_window(hwnd);
+
+			if (get_window_exe(&gc->executable, hwnd)) {
+				get_window_title(&gc->title, hwnd);
+				get_window_class(&gc->class, hwnd);
+
+				gc->priority = WINDOW_PRIORITY_CLASS;
+				gc->retry_time = 10.0f;
+				gc->activate_hook = true;
+			}
+			else {
+				deactivate = false;
+				activate_now = false;
+			}
+		}
+		else if (deactivate) {
+			gc->activate_hook = false;
+		}*/
+
+		blog(LOG_WARNING, "XXXXXXXXXXXX bcu_tick_3D");
+		if (!obs_source_showing(gc->source)) {
 			if (gc->showing) {
 				if (gc->active)
-				{
 					stop_capture(gc);
-				}
 				gc->showing = false;
 			}
+			blog(LOG_WARNING, "XXXXXXXXXXXXXXXXXXX bcu_tick 3D not showing source");
 			return;
 		}
-		else if (!gc->showing)
-		{
-			gc->retry_time = 10.0f;
+		else if (!gc->showing) {
+			gc->retry_time = 5.0f;
 		}
 
-		if (gc->hook_stop && object_signalled(gc->hook_stop))
-		{
+		if (gc->hook_stop && object_signalled(gc->hook_stop)) {
+			debug("hook stop signal received");
+			blog(LOG_WARNING, "XXXXXXXXXXXXXXXXX hook stop signal received");
 			stop_capture(gc);
 		}
+		/*if (gc->active && deactivate) {
+			stop_capture(gc);
+		}*/
 
-		if (gc->active && !gc->hook_ready && gc->process_id)
-		{
-			gc->hook_ready = create_event_plus_id(EVENT_HOOK_READY, gc->process_id);
+		if (gc->active && !gc->hook_ready && gc->process_id) {
+			gc->hook_ready = open_event_gc(gc, EVENT_HOOK_READY);
 		}
 
-		if (gc->injector_process && object_signalled(gc->injector_process))
-		{ 
+		if (gc->injector_process && object_signalled(gc->injector_process)) {
 			DWORD exit_code = 0;
 
 			GetExitCodeProcess(gc->injector_process, &exit_code);
@@ -2158,19 +2206,20 @@ static void bcu_tick(void *data, float seconds)
 			}
 		}
 
-		if (gc->hook_ready && object_signalled(gc->hook_ready))
-		{
+		blog(LOG_WARNING, "XXXXXXXXXXXX bcu_tick_3D 00: %i %i", gc->hook_ready, object_signalled(gc->hook_ready));
+		if (gc->hook_ready) { // && object_signalled(gc->hook_ready)) {
+			debug("capture initializing!");
 			enum capture_result result = init_capture_data(gc);
 
-			if (result == CAPTURE_SUCCESS)
-			{
-				gc->capturing = start_capture(gc);
-				gc->last_rect.right = gc->global_hook_info->base_cx;
-				gc->last_rect.bottom = gc->global_hook_info->base_cy;
-			}
+			info("XXXXXXXXXXXXXXXXXXXX bcu_tick 3D init_capture_data result: %i", (int)result);
 
+			if (result == CAPTURE_SUCCESS)
+				gc->capturing = start_capture(gc);
+			else
+				debug("init_capture_data failed");
 
 			if (result != CAPTURE_RETRY && !gc->capturing) {
+				info("XXXXXXXXXXXXXXXXXXXX bcu_tick 3D init_capture_data failed, stop capturing: %i", (int)result);
 				gc->retry_interval = ERROR_RETRY_INTERVAL;
 				stop_capture(gc);
 			}
@@ -2181,8 +2230,7 @@ static void bcu_tick(void *data, float seconds)
 		if (!gc->active) {
 			if (!gc->error_acquiring &&
 				gc->retry_time > gc->retry_interval) {
-				if (gc->activate_hook)
-				{
+				if (gc->activate_hook) {
 					try_hook(gc);
 					gc->retry_time = 0.0f;
 				}
@@ -2202,6 +2250,7 @@ static void bcu_tick(void *data, float seconds)
 				}
 
 				if (gc->config.cursor) {
+					check_foreground_window(gc, seconds);
 					obs_enter_graphics();
 					cursor_capture(&gc->cursor_data);
 					obs_leave_graphics();
@@ -2215,39 +2264,137 @@ static void bcu_tick(void *data, float seconds)
 			}
 		}
 
-		
-
-		//Set initial settings
-		if (!gc->started)
-		{
-			//Init
-			bcu_init(data);
-
-
-			//Enable start flag
-			gc->started = true;
-		}
-
 		if (!gc->showing)
 			gc->showing = true;
+
+		//if (!obs_source_showing(gc->source))
+		//{
+		//	if (gc->showing) {
+		//		if (gc->active)
+		//		{
+		//			stop_capture(gc);
+		//		}
+		//		gc->showing = false;
+		//	}
+		//	return;
+		//}
+		//else if (!gc->showing)
+		//{
+		//	gc->retry_time = 10.0f;
+		//}
+
+		//if (gc->hook_stop && object_signalled(gc->hook_stop))
+		//{
+		//	stop_capture(gc);
+		//}
+
+		//if (gc->active && !gc->hook_ready && gc->process_id)
+		//{
+		//	gc->hook_ready = create_event_plus_id(EVENT_HOOK_READY, gc->process_id);
+		//}
+
+		//if (gc->injector_process && object_signalled(gc->injector_process))
+		//{ 
+		//	DWORD exit_code = 0;
+
+		//	GetExitCodeProcess(gc->injector_process, &exit_code);
+		//	close_handle(&gc->injector_process);
+
+		//	if (exit_code != 0) {
+		//		warn("inject process failed: %ld", (long)exit_code);
+		//		gc->error_acquiring = true;
+
+		//	}
+		//	else if (!gc->capturing) {
+		//		gc->retry_interval = ERROR_RETRY_INTERVAL;
+		//		stop_capture(gc);
+		//	}
+		//}
+
+		//if (gc->hook_ready && object_signalled(gc->hook_ready))
+		//{
+		//	enum capture_result result = init_capture_data(gc);
+
+		//	if (result == CAPTURE_SUCCESS)
+		//	{
+		//		gc->capturing = start_capture(gc);
+		//		gc->last_rect.right = gc->global_hook_info->base_cx;
+		//		gc->last_rect.bottom = gc->global_hook_info->base_cy;
+		//	}
+
+
+		//	if (result != CAPTURE_RETRY && !gc->capturing) {
+		//		gc->retry_interval = ERROR_RETRY_INTERVAL;
+		//		stop_capture(gc);
+		//	}
+		//}
+
+		//gc->retry_time += seconds;
+
+		//if (!gc->active) {
+		//	if (!gc->error_acquiring &&
+		//		gc->retry_time > gc->retry_interval) {
+		//		if (gc->activate_hook)
+		//		{
+		//			try_hook(gc);
+		//			gc->retry_time = 0.0f;
+		//		}
+		//	}
+		//}
+		//else {
+		//	if (!capture_valid(gc)) {
+		//		info("capture window no longer exists, "
+		//			"terminating capture");
+		//		stop_capture(gc);
+		//	}
+		//	else {
+		//		if (gc->copy_texture) {
+		//			obs_enter_graphics();
+		//			gc->copy_texture(gc);
+		//			obs_leave_graphics();
+		//		}
+
+		//		if (gc->config.cursor) {
+		//			obs_enter_graphics();
+		//			cursor_capture(&gc->cursor_data);
+		//			obs_leave_graphics();
+		//		}
+
+		//		gc->fps_reset_time += seconds;
+		//		if (gc->fps_reset_time >= gc->retry_interval) {
+		//			reset_frame_interval(gc);
+		//			gc->fps_reset_time = 0.0f;
+		//		}
+		//	}
+		//}
+
+		//
+
+		////Set initial settings
+		//if (!gc->started)
+		//{
+		//	//Init
+		//	bcu_init(data);
+
+
+		//	//Enable start flag
+		//	gc->started = true;
+		//}
+
+		//if (!gc->showing)
+		//	gc->showing = true;
 	}
 	else
 	{
-		blog(LOG_WARNING, "bcu_tick_2D 00");
 		if (!obs_source_showing(gc->source))
 			return;
 
-		blog(LOG_WARNING, "bcu_tick_2D 01");
 		if (!gc->window || !IsWindow(gc->window) || !is_valid(data)) {
-			blog(LOG_WARNING, "bcu_tick_2D 02");
 			if (!gc->config.title_second)
 				return;
 
-			blog(LOG_WARNING, "bcu_tick_2D 03");
 			gc->window = find_window(INCLUDE_MINIMIZED, WINDOW_PRIORITY_TITLE, "", gc->config.title_second, "");
-			blog(LOG_WARNING, "bcu_tick_2D 04 %s %i", gc->config.title_second, gc->window);
 			if (!gc->window) {
-				blog(LOG_WARNING, "bcu_tick_2D 05");
 				if (gc->capture.valid)
 					dc_capture_free(&gc->capture);
 				gc->use2D = false;
@@ -2261,31 +2408,10 @@ static void bcu_tick(void *data, float seconds)
 			return;
 		}
 
-		//gc->cursor_check_time += seconds;
-		//if (wc->cursor_check_time > CURSOR_CHECK_TIME) {
-		//	DWORD foreground_pid, target_pid;
-
-		//	// Can't just compare the window handle in case of app with child windows
-		//	if (!GetWindowThreadProcessId(GetForegroundWindow(), &foreground_pid))
-		//		foreground_pid = 0;
-
-		//	if (!GetWindowThreadProcessId(wc->window, &target_pid))
-		//		target_pid = 0;
-
-		//	if (foreground_pid && target_pid && foreground_pid != target_pid)
-		//		wc->capture.cursor_hidden = true;
-		//	else
-		//		wc->capture.cursor_hidden = false;
-
-		//	wc->cursor_check_time = 0.0f;
-		//}
-
 		obs_enter_graphics();
-		blog(LOG_WARNING, "bcu_tick_2D 06");
 
 		GetClientRect(gc->window, &rect);
 
-		blog(LOG_WARNING, "bcu_tick_2D 07");
 		if (!reset_capture) {
 			gc->resize_timer += seconds;
 
@@ -2298,92 +2424,16 @@ static void bcu_tick(void *data, float seconds)
 			}
 		}
 
-		blog(LOG_WARNING, "bcu_tick_2D 08");
 		if (reset_capture) {
 			gc->resize_timer = 0.0f;
 			gc->last_rect = rect;
 			dc_capture_free(&gc->capture);
 			dc_capture_init(&gc->capture, 0, 0, rect.right, rect.bottom,
 				gc->config.cursor, false);
-			blog(LOG_WARNING, "bcu_tick_2D 09 %i %i", rect.right, rect.bottom);
 		}
 
 		dc_capture_capture(&gc->capture, gc->window);
-		blog(LOG_WARNING, "bcu_tick_2D 10");
 		obs_leave_graphics();
-
-		////If source not showing skip tick
-		//if (!obs_source_showing(gc->source))
-		//	return;
-
-
-		////If we do no find window yet
-		//if (!gc->window || !IsWindow(gc->window) || !is_valid(data))
-		//{
-		//	if (!gc->config.title_second)
-		//		return;
-
-		//	gc->window = find_window(INCLUDE_MINIMIZED, gc->config.title_second);
-		//	if (!gc->window)
-		//	{
-		//		blog(LOG_INFO, "Not found window!!!!");
-		//		if (gc->capture.valid)
-		//			dc_capture_free(&gc->capture);
-		//		gc->use2D = false;
-		//		return;
-		//	}
-		//	else
-		//	{
-		//		blog(LOG_INFO, "We find a window!!!!");
-		//		bcu_set_scale(data);
-		//	}
-
-		//	reset_capture = true;
-
-		//}
-		//else if (IsIconic(gc->window))
-		//{
-		//	return;
-		//}
-
-
-		////Start view
-		//obs_enter_graphics();
-
-		////Set initial settings
-		//if (!gc->started)
-		//{
-		//	//Init
-		//	bcu_init(data);
-
-		//	//Enable start flag
-		//	gc->started = true;
-		//}
-
-		////Get window size and update window
-		//GetClientRect(gc->window, &rect);
-		//if (!reset_capture) {
-		//	gc->resize_timer += seconds;
-
-		//	if (gc->resize_timer >= RESIZE_CHECK_TIME) {
-		//		if (rect.bottom != gc->last_rect.bottom ||
-		//			rect.right != gc->last_rect.right)
-		//			reset_capture = true;
-
-		//		gc->resize_timer = 0.0f;
-		//	}
-		//}
-
-		//if (reset_capture)
-		//{
-		//	gc->resize_timer = 0.0f;
-		//	gc->last_rect = rect;
-		//	dc_capture_free(&gc->capture);
-		//	dc_capture_init(&gc->capture, 0, 0, rect.right, rect.bottom, gc->config.cursor, false);
-		//}
-
-		//dc_capture_capture(&gc->capture, gc->window);
-		//obs_leave_graphics();
 	}
 }
 
@@ -2397,7 +2447,28 @@ static inline void bcu_render_cursor(struct bcu *gc)
 
 	if (bcu_assert("bcu_render_cursor", gc) == false) return;
 
-	if (!gc->global_hook_info->window ||
+	HWND window;
+
+	if (!gc->global_hook_info->base_cx ||
+		!gc->global_hook_info->base_cy)
+		return;
+
+	window = !!gc->global_hook_info->window
+		? (HWND)(uintptr_t)gc->global_hook_info->window
+		: gc->window;
+
+	ClientToScreen(window, &p);
+
+	float x_scale = (float)gc->global_hook_info->cx /
+		(float)gc->global_hook_info->base_cx;
+	float y_scale = (float)gc->global_hook_info->cy /
+		(float)gc->global_hook_info->base_cy;
+
+	cursor_draw(&gc->cursor_data, -p.x, -p.y, x_scale, y_scale,
+		gc->global_hook_info->base_cx,
+		gc->global_hook_info->base_cy);
+
+	/*if (!gc->global_hook_info->window ||
 		!gc->global_hook_info->base_cx ||
 		!gc->global_hook_info->base_cy)
 		return;
@@ -2411,7 +2482,7 @@ static inline void bcu_render_cursor(struct bcu *gc)
 
 	cursor_draw(&gc->cursor_data, -p.x, -p.y, x_scale, y_scale,
 		gc->global_hook_info->base_cx,
-		gc->global_hook_info->base_cy);
+		gc->global_hook_info->base_cy);*/
 }
 
 
@@ -2446,15 +2517,15 @@ static void bcu_render(void *data, gs_effect_t *effect)
 
 	struct bcu *gc = data;
 
-
 	// Border
 	float width = gc->last_rect.right;
 	float height = gc->last_rect.bottom;
-	
-
 
 	if (!gc->use2D)
 	{
+		if (gc->texture != 0 || gc->active) {
+			info("XXXXXXXXXXXXXX bcu_render 3D: %i %i", gc->texture, gc->active);
+		}
 		if (!gc->texture || !gc->active)
 			return;
 
@@ -2462,20 +2533,19 @@ static void bcu_render(void *data, gs_effect_t *effect)
 
 		effect = obs_get_base_effect(gc->config.allow_transparency ? OBS_EFFECT_DEFAULT : OBS_EFFECT_OPAQUE);
 
-		while (gs_effect_loop(effect, "Draw"))
-		{
-			obs_source_draw(gc->texture, 0, 0, 0, 0, gc->global_hook_info->flip);		
-			if (gc->config.allow_transparency && gc->config.cursor)
-			{
+		while (gs_effect_loop(effect, "Draw")) {
+			info("XXXXXXXXXXXXXX bcu_render DRAW: %i", gc->texture);
+			obs_source_draw(gc->texture, 0, 0, 0, 0, gc->global_hook_info->flip);
+
+			if (gc->config.allow_transparency && gc->config.cursor && !gc->cursor_hidden) {
 				bcu_render_cursor(gc);
 			}
 		}
 
-		if (!gc->config.allow_transparency && gc->config.cursor)
-		{
+		if (!gc->config.allow_transparency && gc->config.cursor && !gc->cursor_hidden) {
 			effect = obs_get_base_effect(OBS_EFFECT_DEFAULT);
-			while (gs_effect_loop(effect, "Draw"))
-			{
+
+			while (gs_effect_loop(effect, "Draw")) {
 				bcu_render_cursor(gc);
 			}
 		}
