@@ -580,7 +580,7 @@ static void wc_tick(void *data, float seconds)
 		if (!wc->classname)
 			return;
 
-		wc->window = find_window(INCLUDE_MINIMIZED, wc->classname);
+		wc->window = find_window(INCLUDE_MINIMIZED, WINDOW_PRIORITY_CLASS, wc->classname, "", "");
 		if (!wc->window) 
 		{
 			blog(LOG_INFO, "Not found window!!!!");

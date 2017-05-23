@@ -14,13 +14,24 @@ enum window_search_mode {
 };
 
 extern bool get_window_exe(struct dstr *name, HWND window);
+extern void get_window_title(struct dstr *name, HWND hwnd);
+extern void get_window_class(struct dstr *class, HWND hwnd);
+extern bool is_uwp_window(HWND hwnd);
+extern HWND get_uwp_actual_window(HWND parent);
 
-extern void fill_window_list(obs_property_t *p, enum window_search_mode mode);
+typedef bool (*add_window_cb)(const char *title, const char *class,
+		const char *exe);
+
+extern void fill_window_list(obs_property_t *p, enum window_search_mode mode,
+		add_window_cb callback);
 
 extern void build_window_strings(const char *str,
 		char **class,
 		char **title,
 		char **exe);
 
-extern HWND find_window(enum window_search_mode mode, const char *class);
-extern void get_window_title(struct dstr *name, HWND hwnd);
+extern HWND find_window(enum window_search_mode mode,
+		enum window_priority priority,
+		const char *class,
+		const char *title,
+		const char *exe);

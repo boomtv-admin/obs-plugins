@@ -12,6 +12,7 @@ OBS_MODULE_USE_DEFAULT_LOCALE("boom-capture", "en-US")
 extern struct obs_source_info window_capture_info;
 extern struct obs_source_info bcu_info;
 
+static HANDLE init_hooks_thread = NULL;
 
 extern bool cached_versions_match(void);
 extern bool load_cached_graphics_offsets(bool is32bit);
@@ -30,7 +31,37 @@ extern bool load_graphics_offsets(bool is32bit);
 
 #define USE_HOOK_ADDRESS_CACHE false
 
+static DWORD WINAPI init_hooks(LPVOID unused)
+{
+	if (USE_HOOK_ADDRESS_CACHE &&
+		cached_versions_match() &&
+		load_cached_graphics_offsets(IS32BIT)) {
 
+		load_cached_graphics_offsets(!IS32BIT);
+		obs_register_source(&bcu_info);
+
+	}
+	else if (load_graphics_offsets(IS32BIT)) {
+		load_graphics_offsets(!IS32BIT);
+	}
+
+	UNUSED_PARAMETER(unused);
+	return 0;
+}
+
+void wait_for_hook_initialization(void)
+{
+	static bool initialized = false;
+
+	if (!initialized) {
+		if (init_hooks_thread) {
+			WaitForSingleObject(init_hooks_thread, INFINITE);
+			CloseHandle(init_hooks_thread);
+			init_hooks_thread = NULL;
+		}
+		initialized = true;
+	}
+}
 
 
 // Loading module
@@ -51,37 +82,10 @@ bool obs_module_load(void)
 
 	win8_or_above = ver.major > 6 || (ver.major == 6 && ver.minor >= 2);
 
-
-	// Load BoomCapture2D
-	/*obs_enter_graphics();
 	obs_register_source(&window_capture_info);
-	obs_leave_graphics();*/
 
-
-	// Load BoomCapture
-	/*if (USE_HOOK_ADDRESS_CACHE && cached_versions_match() && load_cached_graphics_offsets(IS32BIT)) 
-	{
-		load_cached_graphics_offsets(!IS32BIT);
-		obs_register_source(&vr_game_capture_info);
-	} 
-	else if (load_graphics_offsets(IS32BIT))
-	{
-		load_graphics_offsets(!IS32BIT);
-		obs_register_source(&vr_game_capture_info);
-	}*/
-
-
-	// Load BoomCaptureUniversal
-	if (USE_HOOK_ADDRESS_CACHE && cached_versions_match() && load_cached_graphics_offsets(IS32BIT))
-	{
-		load_cached_graphics_offsets(!IS32BIT);
-		obs_register_source(&bcu_info);
-	}
-	else if (load_graphics_offsets(IS32BIT))
-	{
-		load_graphics_offsets(!IS32BIT);
-		obs_register_source(&bcu_info);
-	}
+	init_hooks_thread = CreateThread(NULL, 0, init_hooks, NULL, 0, NULL);
+	obs_register_source(&bcu_info);
 
 	return true;
 }

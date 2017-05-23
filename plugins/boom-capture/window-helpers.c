@@ -15,7 +15,7 @@ static inline void encode_dstr(struct dstr *str)
 
 static inline char *decode_str(const char *src)
 {
-	struct dstr str = { 0 };
+	struct dstr str = {0};
 	dstr_copy(&str, src);
 	dstr_replace(&str, "#3A", ":");
 	dstr_replace(&str, "#22", "#");
@@ -23,15 +23,15 @@ static inline char *decode_str(const char *src)
 }
 
 extern void build_window_strings(const char *str,
-	char **class,
-	char **title,
-	char **exe)
+		char **class,
+		char **title,
+		char **exe)
 {
 	char **strlist;
 
 	*class = NULL;
 	*title = NULL;
-	*exe = NULL;
+	*exe   = NULL;
 
 	if (!str) {
 		return;
@@ -42,7 +42,7 @@ extern void build_window_strings(const char *str,
 	if (strlist && strlist[0] && strlist[1] && strlist[2]) {
 		*title = decode_str(strlist[0]);
 		*class = decode_str(strlist[1]);
-		*exe = decode_str(strlist[2]);
+		*exe   = decode_str(strlist[2]);
 	}
 
 	strlist_free(strlist);
@@ -57,12 +57,12 @@ static HMODULE kernel32(void)
 }
 
 static inline HANDLE open_process(DWORD desired_access, bool inherit_handle,
-	DWORD process_id)
+		DWORD process_id)
 {
-	static HANDLE(WINAPI *open_process_proc)(DWORD, BOOL, DWORD) = NULL;
+	static HANDLE (WINAPI *open_process_proc)(DWORD, BOOL, DWORD) = NULL;
 	if (!open_process_proc)
 		open_process_proc = get_obfuscated_func(kernel32(),
-			"B}caZyah`~q", 0x2D5BEBAF6DDULL);
+				"B}caZyah`~q", 0x2D5BEBAF6DDULL);
 
 	return open_process_proc(desired_access, inherit_handle, process_id);
 }
@@ -70,7 +70,7 @@ static inline HANDLE open_process(DWORD desired_access, bool inherit_handle,
 bool get_window_exe(struct dstr *name, HWND window)
 {
 	wchar_t     wname[MAX_PATH];
-	struct dstr temp = { 0 };
+	struct dstr temp    = {0};
 	bool        success = false;
 	HANDLE      process = NULL;
 	char        *slash;
@@ -92,7 +92,7 @@ bool get_window_exe(struct dstr *name, HWND window)
 	if (!slash)
 		goto fail;
 
-	dstr_copy(name, slash + 1);
+	dstr_copy(name, slash+1);
 	success = true;
 
 fail:
@@ -113,8 +113,8 @@ void get_window_title(struct dstr *name, HWND hwnd)
 	if (!len)
 		return;
 
-	temp = malloc(sizeof(wchar_t) * (len + 1));
-	if (GetWindowTextW(hwnd, temp, len + 1))
+	temp = malloc(sizeof(wchar_t) * (len+1));
+	if (GetWindowTextW(hwnd, temp, len+1))
 		dstr_from_wcs(name, temp);
 	free(temp);
 }
@@ -128,18 +128,56 @@ void get_window_class(struct dstr *class, HWND hwnd)
 		dstr_from_wcs(class, temp);
 }
 
-static void add_window(obs_property_t *p, HWND hwnd)
+/* not capturable or internal windows */
+static const char *internal_microsoft_exes[] = {
+	"applicationframehost",
+	"shellexperiencehost",
+	"winstore.app",
+	"searchui",
+	NULL
+};
+
+static bool is_microsoft_internal_window_exe(const char *exe)
 {
-	struct dstr class = { 0 };
-	struct dstr title = { 0 };
-	struct dstr exe = { 0 };
-	struct dstr encoded = { 0 };
-	struct dstr desc = { 0 };
+	char cur_exe[MAX_PATH];
+
+	if (!exe)
+		return false;
+
+	for (const char **vals = internal_microsoft_exes; *vals; vals++) {
+		strcpy(cur_exe, *vals);
+		strcat(cur_exe, ".exe");
+
+		if (strcmpi(cur_exe, exe) == 0)
+			return true;
+	}
+
+	return false;
+}
+
+static void add_window(obs_property_t *p, HWND hwnd, add_window_cb callback)
+{
+	struct dstr class   = {0};
+	struct dstr title   = {0};
+	struct dstr exe     = {0};
+	struct dstr encoded = {0};
+	struct dstr desc    = {0};
 
 	if (!get_window_exe(&exe, hwnd))
 		return;
+	if (is_microsoft_internal_window_exe(exe.array)) {
+		dstr_free(&exe);
+		return;
+	}
 	get_window_title(&title, hwnd);
 	get_window_class(&class, hwnd);
+
+	if (callback && !callback(title.array, class.array, exe.array)) {
+		dstr_free(&title);
+		dstr_free(&class);
+		dstr_free(&exe);
+		return;
+	}
 
 	dstr_printf(&desc, "[%s]: %s", exe.array, title.array);
 
@@ -162,20 +200,17 @@ static void add_window(obs_property_t *p, HWND hwnd)
 	dstr_free(&exe);
 }
 
-
-
-
 static bool check_window_valid(HWND window, enum window_search_mode mode)
 {
 	DWORD styles, ex_styles;
 	RECT  rect;
 
 	if (!IsWindowVisible(window) ||
-		(mode == EXCLUDE_MINIMIZED && IsIconic(window)))
+	    (mode == EXCLUDE_MINIMIZED && IsIconic(window)))
 		return false;
 
 	GetClientRect(window, &rect);
-	styles = (DWORD)GetWindowLongPtr(window, GWL_STYLE);
+	styles    = (DWORD)GetWindowLongPtr(window, GWL_STYLE);
 	ex_styles = (DWORD)GetWindowLongPtr(window, GWL_EXSTYLE);
 
 	if (ex_styles & WS_EX_TOOLWINDOW)
@@ -188,70 +223,196 @@ static bool check_window_valid(HWND window, enum window_search_mode mode)
 	return true;
 }
 
-static inline HWND next_window(HWND window, enum window_search_mode mode)
+bool is_uwp_window(HWND hwnd)
 {
+	wchar_t name[256];
+
+	name[0] = 0;
+	if (!GetClassNameW(hwnd, name, sizeof(name) / sizeof(wchar_t)))
+		return false;
+
+	return wcscmp(name, L"ApplicationFrameWindow") == 0;
+}
+
+HWND get_uwp_actual_window(HWND parent)
+{
+	DWORD parent_id = 0;
+	HWND child;
+
+	GetWindowThreadProcessId(parent, &parent_id);
+	child = FindWindowEx(parent, NULL, NULL, NULL);
+
+	while (child) {
+		DWORD child_id = 0;
+		GetWindowThreadProcessId(child, &child_id);
+
+		if (child_id != parent_id)
+			return child;
+
+		child = FindWindowEx(parent, child, NULL, NULL);
+	}
+
+	return NULL;
+}
+
+static HWND next_window(HWND window, enum window_search_mode mode,
+		HWND *parent, bool use_findwindowex)
+{
+	if (*parent) {
+		window = *parent;
+		*parent = NULL;
+	}
+
 	while (true) {
-		window = GetNextWindow(window, GW_HWNDNEXT);
+		if (use_findwindowex)
+			window = FindWindowEx(GetDesktopWindow(), window, NULL,
+					NULL);
+		else
+			window = GetNextWindow(window, GW_HWNDNEXT);
+
 		if (!window || check_window_valid(window, mode))
 			break;
 	}
 
+	if (is_uwp_window(window)) {
+		HWND child = get_uwp_actual_window(window);
+		if (child) {
+			*parent = window;
+			return child;
+		}
+	}
+
 	return window;
 }
 
-static inline HWND first_window(enum window_search_mode mode)
+static HWND first_window(enum window_search_mode mode, HWND *parent,
+		bool *use_findwindowex)
 {
-	HWND window = GetWindow(GetDesktopWindow(), GW_CHILD);
-	if (!check_window_valid(window, mode))
-		window = next_window(window, mode);
+	HWND window = FindWindowEx(GetDesktopWindow(), NULL, NULL, NULL);
+
+	if (!window) {
+		*use_findwindowex = false;
+		window = GetWindow(GetDesktopWindow(), GW_CHILD);
+	} else {
+		*use_findwindowex = true;
+	}
+
+	*parent = NULL;
+
+	if (!check_window_valid(window, mode)) {
+		window = next_window(window, mode, parent, *use_findwindowex);
+
+		if (!window && *use_findwindowex) {
+			*use_findwindowex = false;
+
+			window = GetWindow(GetDesktopWindow(), GW_CHILD);
+			if (!check_window_valid(window, mode))
+				window = next_window(window, mode, parent,
+						*use_findwindowex);
+		}
+	}
+
+	if (is_uwp_window(window)) {
+		HWND child = get_uwp_actual_window(window);
+		if (child) {
+			*parent = window;
+			return child;
+		}
+	}
+
 	return window;
 }
 
-void fill_window_list(obs_property_t *p, enum window_search_mode mode)
+void fill_window_list(obs_property_t *p, enum window_search_mode mode,
+		add_window_cb callback)
 {
-	HWND window = first_window(mode);
+	HWND parent;
+	bool use_findwindowex = false;
+
+	HWND window = first_window(mode, &parent, &use_findwindowex);
 
 	while (window) {
-		add_window(p, window);
-		window = next_window(window, mode);
+		add_window(p, window, callback);
+		window = next_window(window, mode, &parent, use_findwindowex);
 	}
 }
 
-static bool window_rating(HWND window, const char *title)
+static int window_rating(HWND window,
+		enum window_priority priority,
+		const char *class,
+		const char *title,
+		const char *exe,
+		bool uwp_window)
 {
-	struct dstr cur_class = { 0 };
-	struct dstr cur_title = { 0 };
-	struct dstr cur_exe = { 0 };
-	bool equals = false;
+	struct dstr cur_class = {0};
+	struct dstr cur_title = {0};
+	struct dstr cur_exe   = {0};
+	int val = 0x7FFFFFFF;
 
 	if (!get_window_exe(&cur_exe, window))
-		return 0;
+		return 0x7FFFFFFF;
 	get_window_title(&cur_title, window);
 	get_window_class(&cur_class, window);
 
-	if (dstr_cmpi(&cur_title, title) == 0)
-		equals = true;
+	bool class_matches = dstr_cmpi(&cur_class, class) == 0;
+	bool exe_matches = dstr_cmpi(&cur_exe, exe) == 0;
+	int title_val = abs(dstr_cmpi(&cur_title, title));
+
+	/* always match by name with UWP windows */
+	if (uwp_window) {
+		if (priority == WINDOW_PRIORITY_EXE && !exe_matches)
+			val = 0x7FFFFFFF;
+		else
+			val = title_val == 0 ? 0 : 0x7FFFFFFF;
+
+	} else if (priority == WINDOW_PRIORITY_CLASS) {
+		val = class_matches ? title_val : 0x7FFFFFFF;
+		if (val != 0x7FFFFFFF && !exe_matches)
+			val += 0x1000;
+
+	} else if (priority == WINDOW_PRIORITY_TITLE) {
+		val = title_val == 0 ? 0 : 0x7FFFFFFF;
+
+	} else if (priority == WINDOW_PRIORITY_EXE) {
+		val = exe_matches ? title_val : 0x7FFFFFFF;
+	}
 
 	dstr_free(&cur_class);
 	dstr_free(&cur_title);
 	dstr_free(&cur_exe);
 
-	return equals;
+	return val;
 }
 
-HWND find_window(enum window_search_mode mode, const char *title)
+HWND find_window(enum window_search_mode mode,
+		enum window_priority priority,
+		const char *class,
+		const char *title,
+		const char *exe)
 {
-	HWND window = first_window(mode);
+	HWND parent;
+	bool use_findwindowex = false;
+
+	HWND window      = first_window(mode, &parent, &use_findwindowex);
 	HWND best_window = NULL;
+	int  best_rating = 0x7FFFFFFF;
+
+	if (!class)
+		return NULL;
+
+	bool uwp_window  = strcmp(class, "Windows.UI.Core.CoreWindow") == 0;
 
 	while (window) {
-		if (window_rating(window, title))
-		{
+		int rating = window_rating(window, priority, class, title, exe,
+				uwp_window);
+		if (rating < best_rating) {
+			best_rating = rating;
 			best_window = window;
-			break;
+			if (rating == 0)
+				break;
 		}
 
-		window = next_window(window, mode);
+		window = next_window(window, mode, &parent, use_findwindowex);
 	}
 
 	return best_window;

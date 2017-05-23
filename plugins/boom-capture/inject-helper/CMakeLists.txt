@@ -9,6 +9,10 @@ set(inject-helper_SOURCES
 	../obfuscate.c
 	inject-helper.c)
 
+if(MSVC)
+	add_compile_options("$<$<CONFIG:RelWithDebInfo>:/MT>")
+endif()
+
 add_executable(inject-helper
 	${inject-helper_SOURCES})
 
@@ -24,4 +28,4 @@ set_target_properties(inject-helper
 	PROPERTIES
 		OUTPUT_NAME "inject-helper${_output_suffix}")
 
-install_obs_datatarget(inject-helper "obs-plugins/boom-capture")
+install_obs_datatarget(inject-helper "obs-plugins/win-capture")
