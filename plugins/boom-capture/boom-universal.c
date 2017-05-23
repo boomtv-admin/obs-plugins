@@ -125,7 +125,7 @@ struct bcu {
 	ipc_pipe_server_t             pipe;
 	gs_texture_t                  *texture;
 	struct hook_info              *global_hook_info;
-	HANDLE                        keep_alive;
+	HANDLE                        keepalive_mutex;
 	HANDLE                        hook_restart;
 	HANDLE                        hook_stop;
 	HANDLE                        hook_init;
@@ -140,6 +140,10 @@ struct bcu {
 	bool                          is_app;
 	float                         cursor_check_time;
 	bool                          cursor_hidden;
+
+	volatile long                 hotkey_window;
+	volatile bool                 deactivate_hook;
+	volatile bool                 activate_hook_now;
 
 	int retrying;
 
@@ -692,12 +696,18 @@ static void stop_capture(struct bcu *gc)
 		gc->data = NULL;
 	}
 
-	close_handle(&gc->keep_alive);
+	if (gc->app_sid) {
+		LocalFree(gc->app_sid);
+		gc->app_sid = NULL;
+	}
+
 	close_handle(&gc->hook_restart);
 	close_handle(&gc->hook_stop);
 	close_handle(&gc->hook_ready);
 	close_handle(&gc->hook_exit);
+	close_handle(&gc->hook_init);
 	close_handle(&gc->hook_data_map);
+	close_handle(&gc->keepalive_mutex);
 	close_handle(&gc->global_hook_info_map);
 	close_handle(&gc->target_process);
 	close_handle(&gc->texture_mutexes[0]);
@@ -834,7 +844,6 @@ static void bcu_update(void *data, obs_data_t *settings)
 {
 	struct bcu *gc = data;
 	struct bcu_config cfg;
-	info("XXXXXXXXXXXXXX bcu_update: %i %i", (int)data, settings);
 
 	if (bcu_assert("bcu_update", data) == false) return;
 	if (bcu_assert("bcu_update", settings) == false) return;
@@ -842,7 +851,6 @@ static void bcu_update(void *data, obs_data_t *settings)
 
 	if (!gc->use2D)
 	{
-		info("XXXXXXXXXXXXXX bcu_update 3D");
 		bool reset_capture = false;
 
 		get_config(&cfg, settings);
@@ -867,13 +875,11 @@ static void bcu_update(void *data, obs_data_t *settings)
 	}
 	else
 	{
-		info("XXXXXXXXXXXXX bcu_update 2D");
 		gc->window = NULL;
 	}
 }
 
-
-
+extern void wait_for_hook_initialization(void);
 
 // Module create
 static void *bcu_create(obs_data_t *settings, obs_source_t *source)
@@ -882,6 +888,9 @@ static void *bcu_create(obs_data_t *settings, obs_source_t *source)
 	if (bcu_assert("bcu_create", source) == false) return NULL;
 
 	struct bcu *gc = bzalloc(sizeof(*gc));
+
+	wait_for_hook_initialization();
+
 	gc->source = source;
 	gc->initial_config = true;
 	gc->retry_interval = DEFAULT_RETRY_INTERVAL;
@@ -938,28 +947,6 @@ static void *bcu_create(obs_data_t *settings, obs_source_t *source)
 	bcu_update(gc, settings);
 	return gc;
 }
-
-
-
-
-static inline HANDLE create_event_id(bool manual_reset, bool initial_state,
-	const char *name, DWORD process_id)
-{
-	char new_name[128];
-	sprintf(new_name, "%s%lu", name, process_id);
-	return CreateEventA(NULL, manual_reset, initial_state, new_name);
-}
-
-
-
-
-static inline HANDLE open_event_id(const char *name, DWORD process_id)
-{
-	char new_name[128];
-	sprintf(new_name, "%s%lu", name, process_id);
-	return OpenEventA(EVENT_ALL_ACCESS, false, new_name);
-}
-
 
 
 
@@ -1075,8 +1062,8 @@ static inline bool init_keepalive(struct bcu *gc)
 	_snwprintf(new_name, 64, L"%s%lu", WINDOW_HOOK_KEEPALIVE,
 		gc->process_id);
 
-	gc->keep_alive = CreateMutexW(NULL, false, new_name);
-	if (!gc->keep_alive) {
+	gc->keepalive_mutex = CreateMutexW(NULL, false, new_name);
+	if (!gc->keepalive_mutex) {
 		warn("Failed to create keepalive mutex: %lu", GetLastError());
 		return false;
 	}
@@ -1141,16 +1128,6 @@ static inline bool attempt_existing_hook(struct bcu *gc)
 	}
 
 	return false;
-
-	/*gc->hook_restart = open_event_id(EVENT_CAPTURE_RESTART, gc->process_id);
-	if (gc->hook_restart)
-	{
-		debug("existing hook found, signaling process: %s", gc->config.title_first);
-		SetEvent(gc->hook_restart);
-		return true;
-	}
-
-	return false;*/
 }
 
 
@@ -1182,8 +1159,6 @@ static inline void reset_frame_interval(struct bcu *gc)
 
 static inline bool init_hook_info(struct bcu *gc)
 {
-	if (bcu_assert("init_hook_info", gc) == false) return false;
-
 	gc->global_hook_info_map = open_hook_info(gc);
 	if (!gc->global_hook_info_map) {
 		warn("init_hook_info: get_hook_info failed: %lu",
@@ -1215,44 +1190,6 @@ static inline bool init_hook_info(struct bcu *gc)
 	obs_leave_graphics();
 
 	return true;
-
-	//gc->global_hook_info_map = create_hook_info(gc->process_id);
-	//if (!gc->global_hook_info_map) {
-	//	warn("init_hook_info: get_hook_info failed: %lu",
-	//		GetLastError());
-	//	return false;
-	//}
-
-	//gc->global_hook_info = MapViewOfFile(gc->global_hook_info_map,
-	//	FILE_MAP_ALL_ACCESS, 0, 0,
-	//	sizeof(*gc->global_hook_info));
-	//if (!gc->global_hook_info) {
-	//	warn("init_hook_info: failed to map data view: %lu",
-	//		GetLastError());
-	//	return false;
-	//}
-
-
-	//gc->global_hook_info->offsets = gc->process_is_64bit ?
-	//	offsets64 : offsets32;
-	//gc->global_hook_info->capture_overlay = gc->config.capture_overlays;
-	//gc->global_hook_info->force_shmem = gc->config.force_shmem;
-	//gc->global_hook_info->use_scale = false;
-	////gc->global_hook_info->cx = 960;
-	////gc->global_hook_info->cy = 540;
-	//reset_frame_interval(gc);
-
-	//obs_enter_graphics();
-	//if (!gs_shared_texture_available())
-	//	gc->global_hook_info->force_shmem = true;
-	//obs_leave_graphics();
-
-	//obs_enter_graphics();
-	//if (!gs_shared_texture_available())
-	//	gc->global_hook_info->force_shmem = true;
-	//obs_leave_graphics();
-
-	//return true;
 }
 
 
@@ -1269,8 +1206,6 @@ static void pipe_log(void *param, uint8_t *data, size_t size)
 
 static inline bool init_pipe(struct bcu *gc)
 {
-	if (bcu_assert("init_pipe", gc) == false) return false;
-
 	char name[64];
 	sprintf(name, "%s%lu", PIPE_NAME, gc->process_id);
 
@@ -1540,6 +1475,7 @@ static bool init_hook(struct bcu *gc)
 	gc->next_window = NULL;
 	gc->active = true;
 	gc->retrying = 0;
+	info("hooked successfully");
 	return true;
 }
 
@@ -1548,13 +1484,24 @@ static bool init_hook(struct bcu *gc)
 
 static void setup_window(struct bcu *gc, HWND window)
 {
-	DWORD process_id = 0;
 	HANDLE hook_restart;
+	HANDLE process;
 
-	GetWindowThreadProcessId(window, &process_id);
+	GetWindowThreadProcessId(window, &gc->process_id);
+	if (gc->process_id) {
+		process = open_process(PROCESS_QUERY_INFORMATION,
+			false, gc->process_id);
+		if (process) {
+			gc->is_app = is_app(process);
+			if (gc->is_app) {
+				gc->app_sid = get_app_sid(process);
+			}
+			CloseHandle(process);
+		}
+	}
 
 	/* do not wait if we're re-hooking a process */
-	hook_restart = open_event_id(EVENT_CAPTURE_RESTART, process_id);
+	hook_restart = open_event_gc(gc, EVENT_CAPTURE_RESTART);
 	if (hook_restart) {
 		gc->wait_for_target_startup = false;
 		CloseHandle(hook_restart);
@@ -1580,19 +1527,6 @@ static void setup_window(struct bcu *gc, HWND window)
 static void get_selected_window(struct bcu *gc)
 {
 	HWND window;
-	//info("Try to find our ReplayView window!");
-
-	/*if ((strcmpi(gc->config.title_first, "dwm") == 0))
-	{
-		wchar_t class_w[512];
-		os_utf8_to_wcs(gc->config.title_first, 0, class_w, 512);
-		window = FindWindowW(class_w, NULL);
-	}
-	else 
-	{
-		window = find_window(INCLUDE_MINIMIZED, gc->config.title_first);
-	}*/
-
 
 	if ((strcmpi(gc->config.title_first, "dwm") == 0) || (strcmpi(gc->config.title_second, "dwm") == 0))
 	{
@@ -1989,12 +1923,9 @@ static inline bool is_16bit_format(uint32_t format)
 
 
 
-
 static inline bool init_shmem_capture(struct bcu *gc)
 {
 	enum gs_color_format format;
-
-	info("XXXXXXXXXXXXXX init_shmem_capture");
 
 	gc->texture_buffers[0] =
 		(uint8_t*)gc->data + gc->shmem_data->tex1_offset;
@@ -2024,8 +1955,6 @@ static inline bool init_shmem_capture(struct bcu *gc)
 
 static inline bool init_shtex_capture(struct bcu *gc)
 {
-	info("XXXXXXXXXXXXXX init_shtex_capture");
-
 	obs_enter_graphics();
 	gs_texture_destroy(gc->texture);
 	gc->texture = gs_texture_open_shared(gc->shtex_data->tex_handle);
@@ -2044,22 +1973,23 @@ static inline bool init_shtex_capture(struct bcu *gc)
 
 static bool start_capture(struct bcu *gc)
 {
-	info("XXXXXXXXXXXXXXXXXXXX start_capture");
-	if (!init_events(gc)) {
-		warn("start_capture init_events failed");
-		return false;
-	}
+	debug("Starting capture");
+
 	if (gc->global_hook_info->type == CAPTURE_TYPE_MEMORY) {
 		if (!init_shmem_capture(gc)) {
 			warn("start_capture init_shmem_capture failed");
 			return false;
 		}
+
+		info("memory capture successful");
 	}
 	else {
 		if (!init_shtex_capture(gc)) {
 			warn("start_capture init_shtex_capture failed");
 			return false;
 		}
+
+		info("shared texture capture successful");
 	}
 
 	return true;
@@ -2134,32 +2064,6 @@ static void bcu_tick(void *data, float seconds)
 
 	if (!gc->use2D)
 	{
-		/*bool deactivate = os_atomic_set_bool(&gc->deactivate_hook, false);
-		bool activate_now = os_atomic_set_bool(&gc->activate_hook_now, false);
-
-		if (activate_now) {
-			HWND hwnd = (HWND)os_atomic_load_long(&gc->hotkey_window);
-
-			if (is_uwp_window(hwnd))
-				hwnd = get_uwp_actual_window(hwnd);
-
-			if (get_window_exe(&gc->executable, hwnd)) {
-				get_window_title(&gc->title, hwnd);
-				get_window_class(&gc->class, hwnd);
-
-				gc->priority = WINDOW_PRIORITY_CLASS;
-				gc->retry_time = 10.0f;
-				gc->activate_hook = true;
-			}
-			else {
-				deactivate = false;
-				activate_now = false;
-			}
-		}
-		else if (deactivate) {
-			gc->activate_hook = false;
-		}*/
-
 		if (!obs_source_showing(gc->source)) {
 			if (gc->showing) {
 				if (gc->active)
@@ -2174,7 +2078,6 @@ static void bcu_tick(void *data, float seconds)
 
 		if (gc->hook_stop && object_signalled(gc->hook_stop)) {
 			debug("hook stop signal received");
-			blog(LOG_WARNING, "XXXXXXXXXXXXXXXXX hook stop signal received");
 			stop_capture(gc);
 		}
 		/*if (gc->active && deactivate) {
@@ -2202,7 +2105,7 @@ static void bcu_tick(void *data, float seconds)
 			}
 		}
 
-		if (gc->hook_ready) { // && object_signalled(gc->hook_ready)) {
+		if (gc->hook_ready && object_signalled(gc->hook_ready)) {
 			debug("capture initializing!");
 			enum capture_result result = init_capture_data(gc);
 
@@ -2258,123 +2161,6 @@ static void bcu_tick(void *data, float seconds)
 
 		if (!gc->showing)
 			gc->showing = true;
-
-		//if (!obs_source_showing(gc->source))
-		//{
-		//	if (gc->showing) {
-		//		if (gc->active)
-		//		{
-		//			stop_capture(gc);
-		//		}
-		//		gc->showing = false;
-		//	}
-		//	return;
-		//}
-		//else if (!gc->showing)
-		//{
-		//	gc->retry_time = 10.0f;
-		//}
-
-		//if (gc->hook_stop && object_signalled(gc->hook_stop))
-		//{
-		//	stop_capture(gc);
-		//}
-
-		//if (gc->active && !gc->hook_ready && gc->process_id)
-		//{
-		//	gc->hook_ready = create_event_plus_id(EVENT_HOOK_READY, gc->process_id);
-		//}
-
-		//if (gc->injector_process && object_signalled(gc->injector_process))
-		//{ 
-		//	DWORD exit_code = 0;
-
-		//	GetExitCodeProcess(gc->injector_process, &exit_code);
-		//	close_handle(&gc->injector_process);
-
-		//	if (exit_code != 0) {
-		//		warn("inject process failed: %ld", (long)exit_code);
-		//		gc->error_acquiring = true;
-
-		//	}
-		//	else if (!gc->capturing) {
-		//		gc->retry_interval = ERROR_RETRY_INTERVAL;
-		//		stop_capture(gc);
-		//	}
-		//}
-
-		//if (gc->hook_ready && object_signalled(gc->hook_ready))
-		//{
-		//	enum capture_result result = init_capture_data(gc);
-
-		//	if (result == CAPTURE_SUCCESS)
-		//	{
-		//		gc->capturing = start_capture(gc);
-		//		gc->last_rect.right = gc->global_hook_info->base_cx;
-		//		gc->last_rect.bottom = gc->global_hook_info->base_cy;
-		//	}
-
-
-		//	if (result != CAPTURE_RETRY && !gc->capturing) {
-		//		gc->retry_interval = ERROR_RETRY_INTERVAL;
-		//		stop_capture(gc);
-		//	}
-		//}
-
-		//gc->retry_time += seconds;
-
-		//if (!gc->active) {
-		//	if (!gc->error_acquiring &&
-		//		gc->retry_time > gc->retry_interval) {
-		//		if (gc->activate_hook)
-		//		{
-		//			try_hook(gc);
-		//			gc->retry_time = 0.0f;
-		//		}
-		//	}
-		//}
-		//else {
-		//	if (!capture_valid(gc)) {
-		//		info("capture window no longer exists, "
-		//			"terminating capture");
-		//		stop_capture(gc);
-		//	}
-		//	else {
-		//		if (gc->copy_texture) {
-		//			obs_enter_graphics();
-		//			gc->copy_texture(gc);
-		//			obs_leave_graphics();
-		//		}
-
-		//		if (gc->config.cursor) {
-		//			obs_enter_graphics();
-		//			cursor_capture(&gc->cursor_data);
-		//			obs_leave_graphics();
-		//		}
-
-		//		gc->fps_reset_time += seconds;
-		//		if (gc->fps_reset_time >= gc->retry_interval) {
-		//			reset_frame_interval(gc);
-		//			gc->fps_reset_time = 0.0f;
-		//		}
-		//	}
-		//}
-
-		//
-
-		////Set initial settings
-		//if (!gc->started)
-		//{
-		//	//Init
-		//	bcu_init(data);
-
-
-		//	//Enable start flag
-		//	gc->started = true;
-		//}
-
-		//if (!gc->showing)
-		//	gc->showing = true;
 	}
 	else
 	{
@@ -2459,22 +2245,6 @@ static inline void bcu_render_cursor(struct bcu *gc)
 	cursor_draw(&gc->cursor_data, -p.x, -p.y, x_scale, y_scale,
 		gc->global_hook_info->base_cx,
 		gc->global_hook_info->base_cy);
-
-	/*if (!gc->global_hook_info->window ||
-		!gc->global_hook_info->base_cx ||
-		!gc->global_hook_info->base_cy)
-		return;
-
-	ClientToScreen((HWND)(uintptr_t)gc->global_hook_info->window, &p);
-
-	float x_scale = (float)gc->global_hook_info->cx /
-		(float)gc->global_hook_info->base_cx;
-	float y_scale = (float)gc->global_hook_info->cy /
-		(float)gc->global_hook_info->base_cy;
-
-	cursor_draw(&gc->cursor_data, -p.x, -p.y, x_scale, y_scale,
-		gc->global_hook_info->base_cx,
-		gc->global_hook_info->base_cy);*/
 }
 
 
@@ -2515,9 +2285,6 @@ static void bcu_render(void *data, gs_effect_t *effect)
 
 	if (!gc->use2D)
 	{
-		if (gc->texture != 0 || gc->active) {
-			info("XXXXXXXXXXXXXX bcu_render 3D: %i %i", gc->texture, gc->active);
-		}
 		if (!gc->texture || !gc->active)
 			return;
 
@@ -2526,7 +2293,6 @@ static void bcu_render(void *data, gs_effect_t *effect)
 		effect = obs_get_base_effect(gc->config.allow_transparency ? OBS_EFFECT_DEFAULT : OBS_EFFECT_OPAQUE);
 
 		while (gs_effect_loop(effect, "Draw")) {
-			info("XXXXXXXXXXXXXX bcu_render DRAW: %i", gc->texture);
 			obs_source_draw(gc->texture, 0, 0, 0, 0, gc->global_hook_info->flip);
 
 			if (gc->config.allow_transparency && gc->config.cursor && !gc->cursor_hidden) {
