@@ -2127,12 +2127,10 @@ static void check_foreground_window(struct bcu *gc, float seconds)
 static void bcu_tick(void *data, float seconds)
 {
 	if (bcu_assert("bcu_tick", data) == false) return;
-	blog(LOG_WARNING, "bcu_tick");
 
 	struct bcu *gc = data;
 	RECT rect;
 	bool reset_capture = false;
-
 
 	if (!gc->use2D)
 	{
@@ -2162,14 +2160,12 @@ static void bcu_tick(void *data, float seconds)
 			gc->activate_hook = false;
 		}*/
 
-		blog(LOG_WARNING, "XXXXXXXXXXXX bcu_tick_3D");
 		if (!obs_source_showing(gc->source)) {
 			if (gc->showing) {
 				if (gc->active)
 					stop_capture(gc);
 				gc->showing = false;
 			}
-			blog(LOG_WARNING, "XXXXXXXXXXXXXXXXXXX bcu_tick 3D not showing source");
 			return;
 		}
 		else if (!gc->showing) {
@@ -2206,20 +2202,16 @@ static void bcu_tick(void *data, float seconds)
 			}
 		}
 
-		blog(LOG_WARNING, "XXXXXXXXXXXX bcu_tick_3D 00: %i %i", gc->hook_ready, object_signalled(gc->hook_ready));
 		if (gc->hook_ready) { // && object_signalled(gc->hook_ready)) {
 			debug("capture initializing!");
 			enum capture_result result = init_capture_data(gc);
 
-			info("XXXXXXXXXXXXXXXXXXXX bcu_tick 3D init_capture_data result: %i", (int)result);
 
 			if (result == CAPTURE_SUCCESS)
 				gc->capturing = start_capture(gc);
 			else
-				debug("init_capture_data failed");
 
 			if (result != CAPTURE_RETRY && !gc->capturing) {
-				info("XXXXXXXXXXXXXXXXXXXX bcu_tick 3D init_capture_data failed, stop capturing: %i", (int)result);
 				gc->retry_interval = ERROR_RETRY_INTERVAL;
 				stop_capture(gc);
 			}
