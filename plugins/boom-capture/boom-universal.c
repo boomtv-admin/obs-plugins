@@ -1561,7 +1561,7 @@ static void get_selected_window(struct bcu *gc)
 	if (window) 
 	{
 		if (!gc->use2D) setup_window(gc, window);
-		info("Found ReplayView window!");
+		info("Found ReplayView window! %i", gc->is_app);
 	}
 	else 
 	{
