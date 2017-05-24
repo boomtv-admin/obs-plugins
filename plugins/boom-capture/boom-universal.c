@@ -2280,8 +2280,9 @@ static void bcu_render(void *data, gs_effect_t *effect)
 	struct bcu *gc = data;
 
 	// Border
-	float width = gc->last_rect.right;
-	float height = gc->last_rect.bottom;
+	float width = obs_source_get_width(gc->source);
+	float height = obs_source_get_height(gc->source);
+
 
 	if (!gc->use2D)
 	{
