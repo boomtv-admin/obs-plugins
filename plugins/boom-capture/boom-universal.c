@@ -1513,7 +1513,7 @@ static void setup_window(struct bcu *gc, HWND window)
 	* (such as steam) need a little bit of time to load.  ultimately this
 	* helps prevent crashes */
 	if (gc->wait_for_target_startup) {
-		gc->retry_interval = 3.0f;
+		gc->retry_interval = 0.5f;
 		gc->wait_for_target_startup = false;
 	}
 	else {
@@ -2073,7 +2073,7 @@ static void bcu_tick(void *data, float seconds)
 			return;
 		}
 		else if (!gc->showing) {
-			gc->retry_time = 5.0f;
+			gc->retry_time = 3.0f;
 		}
 
 		if (gc->hook_stop && object_signalled(gc->hook_stop)) {
