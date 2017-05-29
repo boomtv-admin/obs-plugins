@@ -58,8 +58,8 @@
 #define TEXT_CAPTURE_OVERLAYS    obs_module_text("CaptureOverlays")
 #define TEXT_ANTI_CHEAT_HOOK     obs_module_text("AntiCheatHook")
 
-#define DEFAULT_RETRY_INTERVAL 1.0f
-#define ERROR_RETRY_INTERVAL 1.5f
+#define DEFAULT_RETRY_INTERVAL 0.25f
+#define ERROR_RETRY_INTERVAL 0.5f
 
 #define RESIZE_CHECK_TIME 0.2f
 
@@ -1513,7 +1513,7 @@ static void setup_window(struct bcu *gc, HWND window)
 	* (such as steam) need a little bit of time to load.  ultimately this
 	* helps prevent crashes */
 	if (gc->wait_for_target_startup) {
-		gc->retry_interval = 0.5f;
+		gc->retry_interval = 0.1f;
 		gc->wait_for_target_startup = false;
 	}
 	else {
@@ -2073,7 +2073,7 @@ static void bcu_tick(void *data, float seconds)
 			return;
 		}
 		else if (!gc->showing) {
-			gc->retry_time = 3.0f;
+			gc->retry_time = 0.5f;
 		}
 
 		if (gc->hook_stop && object_signalled(gc->hook_stop)) {
