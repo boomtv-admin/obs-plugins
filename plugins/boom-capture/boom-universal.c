@@ -38,22 +38,22 @@
 #define SETTING_TRANSPARENCY     "allow_transparency"
 #define SETTING_LIMIT_FRAMERATE  "limit_framerate"
 #define SETTING_BORDER_COLOR	 "border_color"
-#define SETTING_ANTI_CHEAT_HOOK  "anti_cheat_hook"
+#define SETTING_BORDER_THICKNESS "border_thickness"
 
 #define TEXT_BCU				 obs_module_text("Boom Replay")
 #define TEXT_SLI_COMPATIBILITY   obs_module_text("Compatibility")
 #define TEXT_ALLOW_TRANSPARENCY  obs_module_text("AllowTransparency")
 #define TEXT_CAPTURE_CURSOR      obs_module_text("CaptureCursor")
 #define TEXT_LIMIT_FRAMERATE     obs_module_text("LimitFramerate")
-#define TEXT_CAPTURE_OVERLAYS    obs_module_text("CaptureOverlays")
-#define TEXT_ANTI_CHEAT_HOOK     obs_module_text("AntiCheatHook")
 #define TEXT_BORDER_COLOR		 obs_module_text("Border Color")
+#define TEXT_BORDER_THICKNESS	 obs_module_text("Border Thickness")
 
 #define DEFAULT_RETRY_INTERVAL 0.25f
 #define ERROR_RETRY_INTERVAL 0.5f
 #define RESIZE_CHECK_TIME 0.2f
 
-#define DEFAULT_BORDER_COLOR 0xFF666666
+#define DEFAULT_BORDER_COLOR		0xFF666666
+#define DEFAULT_BORDER_THICKNESS	10
 
 
 
@@ -70,8 +70,8 @@ struct bcu_config {
 	bool                          force_shmem : 1;
 	bool                          allow_transparency : 1;
 	bool                          limit_framerate : 1;
-	bool                          anticheat_hook : 1;
 	uint32_t					  border_color;
+	int							  border_thickness;
 };
 
 
@@ -168,7 +168,7 @@ struct graphics_offsets offsets64 = { 0 };
 
 static inline bool use_anticheat(struct bcu *gc)
 {
-	return gc->config.anticheat_hook && !gc->is_app;
+	return false;
 }
 
 static inline HANDLE open_mutex_plus_id(struct bcu *gc,
@@ -221,6 +221,7 @@ static inline HANDLE open_hook_info(struct bcu *gc)
 	return open_map_plus_id(gc, SHMEM_HOOK_INFO, gc->process_id);
 }
 
+
 //===============================================  Initialize functions  ===============================================
 
 //BCU hotkey helper struct
@@ -230,8 +231,6 @@ struct bcu_hotkey_helper {
 	int hide_id;
 	int reset_id;
 };
-
-
 
 
 //Assertation
@@ -249,8 +248,6 @@ bool bcu_assert(const char* funcname, void* param)
 	}
 	return true;
 }
-
-
 
 
 //Get JSON data
@@ -275,8 +272,6 @@ char* bcu_get_json_data_from_file(const char* path)
 
 	return result;
 }
-
-
 
 
 //Find id
@@ -309,8 +304,6 @@ bool bcu_find_id_helper(void *data, size_t idx, obs_hotkey_t *hotkey)
 
 	return true;
 }
-
-
 
 
 //Get current scene
@@ -367,8 +360,6 @@ struct obs_scene* bcu_get_scene(void *data)
 }
 
 
-
-
 //Get scene item
 struct obs_scene_item* bcu_get_scene_item(void *data)
 {
@@ -397,8 +388,6 @@ struct obs_scene_item* bcu_get_scene_item(void *data)
 
 	return item;
 }
-
-
 
 
 //Set default position
@@ -458,8 +447,6 @@ void bcu_set_default_postition(void *data)
 }
 
 
-
-
 //Reset dimensions
 void bcu_set_scale(void *data)
 {
@@ -507,8 +494,6 @@ void bcu_set_scale(void *data)
 }
 
 
-
-
 //Hotkey positioning
 static bool bcu_hotkey_pos(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotkey, bool pressed)
 {
@@ -531,8 +516,6 @@ static bool bcu_hotkey_pos(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotk
 
 	return false;
 }
-
-
 
 
 //Init
@@ -603,14 +586,6 @@ void bcu_init(void *data)
 }
 
 
-
-
-
-
-
-
-
-
 //===============================================  Functions  ===============================================
 
 static inline enum gs_color_format convert_format(uint32_t format)
@@ -629,8 +604,6 @@ static inline enum gs_color_format convert_format(uint32_t format)
 }
 
 
-
-
 static void close_handle(HANDLE *p_handle)
 {
 	HANDLE handle = *p_handle;
@@ -642,8 +615,6 @@ static void close_handle(HANDLE *p_handle)
 }
 
 
-
-
 static inline HMODULE kernel32(void)
 {
 	static HMODULE kernel32_handle = NULL;
@@ -651,8 +622,6 @@ static inline HMODULE kernel32(void)
 		kernel32_handle = GetModuleHandleW(L"kernel32");
 	return kernel32_handle;
 }
-
-
 
 
 static inline HANDLE open_process(DWORD desired_access, bool inherit_handle,
@@ -665,8 +634,6 @@ static inline HANDLE open_process(DWORD desired_access, bool inherit_handle,
 
 	return open_process_proc(desired_access, inherit_handle, process_id);
 }
-
-
 
 
 // Stop capturing
@@ -719,8 +686,6 @@ static void stop_capture(struct bcu *gc)
 }
 
 
-
-
 static inline void free_config(struct bcu_config *config)
 {
 	if (bcu_assert("free_config", config) == false) return;
@@ -729,8 +694,6 @@ static inline void free_config(struct bcu_config *config)
 	bfree(config->title_second);
 	memset(config, 0, sizeof(*config));
 }
-
-
 
 
 static void bcu_destroy(void *data)
@@ -758,8 +721,6 @@ static void bcu_destroy(void *data)
 }
 
 
-
-
 static inline void get_config(struct bcu_config *cfg, obs_data_t *settings)
 {
 	if (bcu_assert("get_config", cfg) == false) return;
@@ -779,11 +740,9 @@ static inline void get_config(struct bcu_config *cfg, obs_data_t *settings)
 	cfg->cursor = obs_data_get_bool(settings, SETTING_CURSOR);
 	cfg->allow_transparency = obs_data_get_bool(settings, SETTING_TRANSPARENCY);
 	cfg->limit_framerate = obs_data_get_bool(settings, SETTING_LIMIT_FRAMERATE);
-	cfg->anticheat_hook = obs_data_get_bool(settings, SETTING_ANTI_CHEAT_HOOK);
 	cfg->border_color = (uint32_t)obs_data_get_int(settings, SETTING_BORDER_COLOR);
+	cfg->border_thickness = obs_data_get_int(settings, SETTING_BORDER_THICKNESS);
 }
-
-
 
 
 static inline int s_cmp(const char *str1, const char *str2)
@@ -793,8 +752,6 @@ static inline int s_cmp(const char *str1, const char *str2)
 
 	return strcmp(str1, str2);
 }
-
-
 
 
 static inline bool capture_needs_reset(struct bcu_config *cfg1, struct bcu_config *cfg2)
@@ -824,8 +781,6 @@ static inline bool capture_needs_reset(struct bcu_config *cfg1, struct bcu_confi
 }
 
 
-
-
 // Module update
 static void bcu_update(void *data, obs_data_t *settings)
 {
@@ -835,10 +790,11 @@ static void bcu_update(void *data, obs_data_t *settings)
 	if (bcu_assert("bcu_update", data) == false) return;
 	if (bcu_assert("bcu_update", settings) == false) return;
 
-	// Update the border color
+	// Update the border color & thickness
 	uint32_t color = (uint32_t)obs_data_get_int(settings, SETTING_BORDER_COLOR);
 	gc->colorVal = color;
-
+	int thickness = obs_data_get_int(settings, SETTING_BORDER_THICKNESS);
+	gc->thickness = thickness;
 
 	if (!gc->use2D)
 	{
@@ -869,6 +825,7 @@ static void bcu_update(void *data, obs_data_t *settings)
 		gc->window = NULL;
 	}
 }
+
 
 extern void wait_for_hook_initialization(void);
 
@@ -914,7 +871,6 @@ static void *bcu_create(obs_data_t *settings, obs_source_t *source)
 	FindClose(hFind);
 
 	// Init border effects
-	gc->thickness = 10;
 	obs_enter_graphics();
 	gc->solid = obs_get_base_effect(OBS_EFFECT_SOLID);
 	gc->color = gs_effect_get_param_by_name(gc->solid, "color");
@@ -939,13 +895,10 @@ static void *bcu_create(obs_data_t *settings, obs_source_t *source)
 }
 
 
-
 #define STOP_BEING_BAD \
 	"  This is most likely due to security software. Please make sure " \
         "that the OBS installation folder is excluded/ignored in the "      \
         "settings of the security software you are using."
-
-
 
 
 static bool check_file_integrity(struct bcu *gc, const char *file,
@@ -993,8 +946,6 @@ static bool check_file_integrity(struct bcu *gc, const char *file,
 }
 
 
-
-
 static inline bool is_64bit_windows(void)
 {
 #ifdef _WIN64
@@ -1005,8 +956,6 @@ static inline bool is_64bit_windows(void)
 	return success && !!x86;
 #endif
 }
-
-
 
 
 static inline bool is_64bit_process(HANDLE process)
@@ -1021,8 +970,6 @@ static inline bool is_64bit_process(HANDLE process)
 
 	return !x86;
 }
-
-
 
 
 static inline bool open_target_process(struct bcu *gc)
@@ -1044,8 +991,6 @@ static inline bool open_target_process(struct bcu *gc)
 }
 
 
-
-
 static inline bool init_keepalive(struct bcu *gc)
 {
 	wchar_t new_name[64];
@@ -1062,8 +1007,6 @@ static inline bool init_keepalive(struct bcu *gc)
 }
 
 
-
-
 //Returns the last Win32 error, in string format. Returns an empty string if there is no error.
 char* GetLastErrorAsString()
 {
@@ -1073,7 +1016,6 @@ char* GetLastErrorAsString()
 
 	return buf;
 }
-
 
 
 static inline bool init_texture_mutexes(struct bcu *gc)
@@ -1102,8 +1044,6 @@ static inline bool init_texture_mutexes(struct bcu *gc)
 }
 
 
-
-
 /* if there's already a hook in the process, then signal and start */
 static inline bool attempt_existing_hook(struct bcu *gc)
 {
@@ -1119,8 +1059,6 @@ static inline bool attempt_existing_hook(struct bcu *gc)
 
 	return false;
 }
-
-
 
 
 static inline void reset_frame_interval(struct bcu *gc)
@@ -1143,8 +1081,6 @@ static inline void reset_frame_interval(struct bcu *gc)
 
 	gc->global_hook_info->frame_interval = interval;
 }
-
-
 
 
 static inline bool init_hook_info(struct bcu *gc)
@@ -1182,15 +1118,11 @@ static inline bool init_hook_info(struct bcu *gc)
 }
 
 
-
-
 static void pipe_log(void *param, uint8_t *data, size_t size)
 {
 	struct bcu *gc = param;
 	if (data && size) info("%s", data);
 }
-
-
 
 
 static inline bool init_pipe(struct bcu *gc)
@@ -1207,8 +1139,6 @@ static inline bool init_pipe(struct bcu *gc)
 }
 
 
-
-
 static inline int inject_library(HANDLE process, const wchar_t *dll)
 {
 	return inject_library_obf(process, dll,
@@ -1218,8 +1148,6 @@ static inline int inject_library(HANDLE process, const wchar_t *dll)
 		"\\`zs}gmOzhhBq", 0x12897dd89168789a,
 		"GbfkDaezbp~X", 0x76aff7238788f7db);
 }
-
-
 
 
 static inline bool hook_direct(struct bcu *gc,
@@ -1263,15 +1191,13 @@ static inline bool hook_direct(struct bcu *gc,
 }
 
 
-
-
 static inline bool create_inject_process(struct bcu *gc,
 	const char *inject_path, const char *hook_dll)
 {
 	wchar_t *command_line_w = malloc(4096 * sizeof(wchar_t));
 	wchar_t *inject_path_w;
 	wchar_t *hook_dll_w;
-	bool anti_cheat = gc->config.anticheat_hook;
+	bool anti_cheat = false;
 	PROCESS_INFORMATION pi = { 0 };
 	STARTUPINFO si = { 0 };
 	bool success = false;
@@ -1302,8 +1228,6 @@ static inline bool create_inject_process(struct bcu *gc,
 	bfree(hook_dll_w);
 	return success;
 }
-
-
 
 
 static inline bool inject_hook(struct bcu *gc)
@@ -1353,7 +1277,6 @@ cleanup:
 	bfree(hook_path);
 	return success;
 }
-
 
 
 static inline bool init_events(struct bcu *gc)
@@ -1406,10 +1329,12 @@ static inline bool init_events(struct bcu *gc)
 	return true;
 }
 
+
 static bool target_suspended(struct bcu *gc)
 {
 	return thread_is_suspended(gc->process_id, gc->thread_id);
 }
+
 
 static bool init_hook(struct bcu *gc)
 {
@@ -1469,8 +1394,6 @@ static bool init_hook(struct bcu *gc)
 }
 
 
-
-
 static void setup_window(struct bcu *gc, HWND window)
 {
 	HANDLE hook_restart;
@@ -1509,8 +1432,6 @@ static void setup_window(struct bcu *gc, HWND window)
 		gc->next_window = window;
 	}
 }
-
-
 
 
 static void get_selected_window(struct bcu *gc)
@@ -1561,8 +1482,6 @@ static void get_selected_window(struct bcu *gc)
 }
 
 
-
-
 static void try_hook(struct bcu *gc)
 {
 	get_selected_window(gc);
@@ -1595,15 +1514,11 @@ static void try_hook(struct bcu *gc)
 }
 
 
-
-
 enum capture_result {
 	CAPTURE_FAIL,
 	CAPTURE_RETRY,
 	CAPTURE_SUCCESS
 };
-
-
 
 
 static inline enum capture_result init_capture_data(struct bcu *gc)
@@ -1644,10 +1559,9 @@ static inline enum capture_result init_capture_data(struct bcu *gc)
 	return CAPTURE_SUCCESS;
 }
 
+
 #define PIXEL_16BIT_SIZE 2
 #define PIXEL_32BIT_SIZE 4
-
-
 
 
 static inline uint32_t convert_5_to_8bit(uint16_t val)
@@ -1656,14 +1570,10 @@ static inline uint32_t convert_5_to_8bit(uint16_t val)
 }
 
 
-
-
 static inline uint32_t convert_6_to_8bit(uint16_t val)
 {
 	return (uint32_t)((double)(val & 0x3F) * (255.0 / 63.0));
 }
-
-
 
 
 static void copy_b5g6r5_tex(struct bcu *gc, int cur_texture,
@@ -1739,8 +1649,6 @@ static void copy_b5g6r5_tex(struct bcu *gc, int cur_texture,
 		}
 	}
 }
-
-
 
 
 static void copy_b5g5r5a1_tex(struct bcu *gc, int cur_texture,
@@ -1831,8 +1739,6 @@ static void copy_b5g5r5a1_tex(struct bcu *gc, int cur_texture,
 }
 
 
-
-
 static inline void copy_16bit_tex(struct bcu *gc, int cur_texture,
 	uint8_t *data, uint32_t pitch)
 {
@@ -1844,8 +1750,6 @@ static inline void copy_16bit_tex(struct bcu *gc, int cur_texture,
 		copy_b5g6r5_tex(gc, cur_texture, data, pitch);
 	}
 }
-
-
 
 
 static void copy_shmem_tex(struct bcu *gc)
@@ -1902,14 +1806,11 @@ static void copy_shmem_tex(struct bcu *gc)
 }
 
 
-
-
 static inline bool is_16bit_format(uint32_t format)
 {
 	return format == DXGI_FORMAT_B5G5R5A1_UNORM ||
 		format == DXGI_FORMAT_B5G6R5_UNORM;
 }
-
 
 
 static inline bool init_shmem_capture(struct bcu *gc)
@@ -1941,7 +1842,6 @@ static inline bool init_shmem_capture(struct bcu *gc)
 }
 
 
-
 static inline bool init_shtex_capture(struct bcu *gc)
 {
 	obs_enter_graphics();
@@ -1956,8 +1856,6 @@ static inline bool init_shtex_capture(struct bcu *gc)
 
 	return true;
 }
-
-
 
 
 static bool start_capture(struct bcu *gc)
@@ -1985,8 +1883,6 @@ static bool start_capture(struct bcu *gc)
 }
 
 
-
-
 static inline bool capture_valid(struct bcu *gc)
 {
 	if (!gc->dwm_capture && !IsWindow(gc->window))
@@ -2003,8 +1899,6 @@ static inline bool capture_valid(struct bcu *gc)
 
 	return !object_signalled(gc->target_process);
 }
-
-
 
 
 // if the window title is still the same
@@ -2205,8 +2099,6 @@ static void bcu_tick(void *data, float seconds)
 }
 
 
-
-
 // Render cursor
 static inline void bcu_render_cursor(struct bcu *gc)
 {
@@ -2237,8 +2129,6 @@ static inline void bcu_render_cursor(struct bcu *gc)
 }
 
 
-
-
 void bcu_render_border(struct bcu *gc, float width, float height)
 {
 	gs_effect_t    *solid = obs_get_base_effect(OBS_EFFECT_SOLID);
@@ -2263,8 +2153,6 @@ void bcu_render_border(struct bcu *gc, float width, float height)
 	gs_technique_end(gc->tech);
 	gs_load_vertexbuffer(NULL);
 }
-
-
 
 
 // Module item render
@@ -2314,8 +2202,6 @@ static void bcu_render(void *data, gs_effect_t *effect)
 }
 
 
-
-
 // Module item width
 static uint32_t bcu_width(void *data)
 {
@@ -2333,8 +2219,6 @@ static uint32_t bcu_width(void *data)
 }
 
 
-
-
 // Module item height
 static uint32_t bcu_height(void *data)
 {
@@ -2350,8 +2234,6 @@ static uint32_t bcu_height(void *data)
 		return gc->capture.height;
 	}
 }
-
-
 
 
 // Module name
@@ -2373,8 +2255,8 @@ static void bcu_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, SETTING_CURSOR, true);
 	obs_data_set_default_bool(settings, SETTING_TRANSPARENCY, false);
 	obs_data_set_default_bool(settings, SETTING_LIMIT_FRAMERATE, false);
-	obs_data_set_default_bool(settings, SETTING_ANTI_CHEAT_HOOK, true);
 	obs_data_set_default_int(settings, SETTING_BORDER_COLOR, DEFAULT_BORDER_COLOR);
+	obs_data_set_default_int(settings, SETTING_BORDER_THICKNESS, DEFAULT_BORDER_THICKNESS);
 }
 
 
@@ -2387,8 +2269,8 @@ static obs_properties_t *bcu_properties(void *data)
 	obs_properties_add_bool(ppts, SETTING_TRANSPARENCY, TEXT_ALLOW_TRANSPARENCY);
 	obs_properties_add_bool(ppts, SETTING_LIMIT_FRAMERATE, TEXT_LIMIT_FRAMERATE);
 	obs_properties_add_bool(ppts, SETTING_CURSOR, TEXT_CAPTURE_CURSOR);
-	obs_properties_add_bool(ppts, SETTING_ANTI_CHEAT_HOOK, TEXT_ANTI_CHEAT_HOOK);
 	obs_properties_add_color(ppts, SETTING_BORDER_COLOR, TEXT_BORDER_COLOR);
+	obs_properties_add_int_slider(ppts, SETTING_BORDER_THICKNESS, TEXT_BORDER_THICKNESS, 0, 25, 1);
 
 	UNUSED_PARAMETER(data);
 	return ppts;
