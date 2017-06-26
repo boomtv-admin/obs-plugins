@@ -26,10 +26,6 @@
 
 
 
-
-
-
-
 //===============================================  Defines  ===============================================
 
 #define do_log(level, format, ...) blog(level, "[boom-capture-univ: '%s'] " format, obs_source_get_name(gc->source), ##__VA_ARGS__)
@@ -37,18 +33,12 @@
 #define info(format, ...)  do_log(LOG_INFO,    format, ##__VA_ARGS__)
 #define debug(format, ...) do_log(LOG_DEBUG,   format, ##__VA_ARGS__)
 
-
-
-
 #define SETTING_COMPATIBILITY    "sli_compatibility"
 #define SETTING_CURSOR           "capture_cursor"
 #define SETTING_TRANSPARENCY     "allow_transparency"
 #define SETTING_LIMIT_FRAMERATE  "limit_framerate"
-#define SETTING_CAPTURE_OVERLAYS "capture_overlays"
+#define SETTING_BORDER_COLOR	 "border_color"
 #define SETTING_ANTI_CHEAT_HOOK  "anti_cheat_hook"
-
-
-
 
 #define TEXT_BCU				 obs_module_text("Boom Replay")
 #define TEXT_SLI_COMPATIBILITY   obs_module_text("Compatibility")
@@ -57,11 +47,13 @@
 #define TEXT_LIMIT_FRAMERATE     obs_module_text("LimitFramerate")
 #define TEXT_CAPTURE_OVERLAYS    obs_module_text("CaptureOverlays")
 #define TEXT_ANTI_CHEAT_HOOK     obs_module_text("AntiCheatHook")
+#define TEXT_BORDER_COLOR		 obs_module_text("Border Color")
 
 #define DEFAULT_RETRY_INTERVAL 0.25f
 #define ERROR_RETRY_INTERVAL 0.5f
-
 #define RESIZE_CHECK_TIME 0.2f
+
+#define DEFAULT_BORDER_COLOR 0xFF666666
 
 
 
@@ -78,8 +70,8 @@ struct bcu_config {
 	bool                          force_shmem : 1;
 	bool                          allow_transparency : 1;
 	bool                          limit_framerate : 1;
-	bool                          capture_overlays : 1;
 	bool                          anticheat_hook : 1;
+	uint32_t					  border_color;
 };
 
 
@@ -147,12 +139,12 @@ struct bcu {
 
 	int retrying;
 
-	gs_effect_t					  *solid;
-	gs_eparam_t					  *color;
-	gs_technique_t				  *tech;
-	gs_vertbuffer_t				  *box;
-	struct vec4					  colorVal;
-	int							  thickness;
+	gs_effect_t					*solid;
+	gs_eparam_t					*color;
+	gs_technique_t				*tech;
+	gs_vertbuffer_t				*box;
+	uint32_t					colorVal;
+	int							thickness;
 
 
 	union {
@@ -787,8 +779,8 @@ static inline void get_config(struct bcu_config *cfg, obs_data_t *settings)
 	cfg->cursor = obs_data_get_bool(settings, SETTING_CURSOR);
 	cfg->allow_transparency = obs_data_get_bool(settings, SETTING_TRANSPARENCY);
 	cfg->limit_framerate = obs_data_get_bool(settings, SETTING_LIMIT_FRAMERATE);
-	cfg->capture_overlays = obs_data_get_bool(settings, SETTING_CAPTURE_OVERLAYS);
 	cfg->anticheat_hook = obs_data_get_bool(settings, SETTING_ANTI_CHEAT_HOOK);
+	cfg->border_color = (uint32_t)obs_data_get_int(settings, SETTING_BORDER_COLOR);
 }
 
 
@@ -828,11 +820,6 @@ static inline bool capture_needs_reset(struct bcu_config *cfg1, struct bcu_confi
 
 	}
 
-	else if (cfg1->capture_overlays != cfg2->capture_overlays)
-	{
-		return true;
-	}
-
 	return false;
 }
 
@@ -847,6 +834,10 @@ static void bcu_update(void *data, obs_data_t *settings)
 
 	if (bcu_assert("bcu_update", data) == false) return;
 	if (bcu_assert("bcu_update", settings) == false) return;
+
+	// Update the border color
+	uint32_t color = (uint32_t)obs_data_get_int(settings, SETTING_BORDER_COLOR);
+	gc->colorVal = color;
 
 
 	if (!gc->use2D)
@@ -935,7 +926,6 @@ static void *bcu_create(obs_data_t *settings, obs_source_t *source)
 	gs_vertex2f(1.0f, 0.0f);
 	gs_vertex2f(0.0f, 0.0f);
 	gc->box = gs_render_save();
-	vec4_set(&gc->colorVal, (float)102 / 255, (float)102 / 255, (float)102 / 255, 1.0f);
 	obs_leave_graphics();
 
 
@@ -1177,7 +1167,6 @@ static inline bool init_hook_info(struct bcu *gc)
 
 	gc->global_hook_info->offsets = gc->process_is_64bit ?
 		offsets64 : offsets32;
-	gc->global_hook_info->capture_overlay = gc->config.capture_overlays;
 	gc->global_hook_info->force_shmem = gc->config.force_shmem;
 	gc->global_hook_info->use_scale = false;
 	reset_frame_interval(gc);
@@ -2252,12 +2241,18 @@ static inline void bcu_render_cursor(struct bcu *gc)
 
 void bcu_render_border(struct bcu *gc, float width, float height)
 {
-	float size = gc->thickness + 1;
-	gs_effect_set_vec4(gc->color, &gc->colorVal);
+	gs_effect_t    *solid = obs_get_base_effect(OBS_EFFECT_SOLID);
+	gs_eparam_t    *color = gs_effect_get_param_by_name(solid, "color");
+	gs_technique_t *tech = gs_effect_get_technique(solid, "Solid");
+
+	struct vec4 colorVal;
+	vec4_from_rgba(&colorVal, gc->colorVal);
+	gs_effect_set_vec4(color, &colorVal);
 	gs_technique_begin(gc->tech);
 	gs_technique_begin_pass(gc->tech, 0);
 
 	gs_matrix_push();
+	float size = gc->thickness + 1;
 	gs_matrix_translate3f(-size, -size, 0);
 	gs_matrix_scale3f(width + (size * 2), height + (size * 2), 1.0f);
 	gs_load_vertexbuffer(gc->box);
@@ -2378,11 +2373,9 @@ static void bcu_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, SETTING_CURSOR, true);
 	obs_data_set_default_bool(settings, SETTING_TRANSPARENCY, false);
 	obs_data_set_default_bool(settings, SETTING_LIMIT_FRAMERATE, false);
-	obs_data_set_default_bool(settings, SETTING_CAPTURE_OVERLAYS, false);
 	obs_data_set_default_bool(settings, SETTING_ANTI_CHEAT_HOOK, true);
+	obs_data_set_default_int(settings, SETTING_BORDER_COLOR, DEFAULT_BORDER_COLOR);
 }
-
-
 
 
 // Module properties
@@ -2395,7 +2388,7 @@ static obs_properties_t *bcu_properties(void *data)
 	obs_properties_add_bool(ppts, SETTING_LIMIT_FRAMERATE, TEXT_LIMIT_FRAMERATE);
 	obs_properties_add_bool(ppts, SETTING_CURSOR, TEXT_CAPTURE_CURSOR);
 	obs_properties_add_bool(ppts, SETTING_ANTI_CHEAT_HOOK, TEXT_ANTI_CHEAT_HOOK);
-	obs_properties_add_bool(ppts, SETTING_CAPTURE_OVERLAYS, TEXT_CAPTURE_OVERLAYS);
+	obs_properties_add_color(ppts, SETTING_BORDER_COLOR, TEXT_BORDER_COLOR);
 
 	UNUSED_PARAMETER(data);
 	return ppts;
