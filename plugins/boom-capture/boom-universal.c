@@ -672,6 +672,10 @@ static void stop_capture(struct bcu *gc)
 	close_handle(&gc->texture_mutexes[0]);
 	close_handle(&gc->texture_mutexes[1]);
 
+	// Empty the texture buffer
+	memset(gc->texture_buffers[0], 0, gc->pitch * gc->cy);
+	memset(gc->texture_buffers[1], 0, gc->pitch * gc->cy);
+
 	if (gc->texture) {
 		obs_enter_graphics();
 		gs_texture_destroy(gc->texture);
@@ -2131,13 +2135,9 @@ static inline void bcu_render_cursor(struct bcu *gc)
 
 void bcu_render_border(struct bcu *gc, float width, float height)
 {
-	gs_effect_t    *solid = obs_get_base_effect(OBS_EFFECT_SOLID);
-	gs_eparam_t    *color = gs_effect_get_param_by_name(solid, "color");
-	gs_technique_t *tech = gs_effect_get_technique(solid, "Solid");
-
 	struct vec4 colorVal;
 	vec4_from_rgba(&colorVal, gc->colorVal);
-	gs_effect_set_vec4(color, &colorVal);
+	gs_effect_set_vec4(gc->color, &colorVal);
 	gs_technique_begin(gc->tech);
 	gs_technique_begin_pass(gc->tech, 0);
 
