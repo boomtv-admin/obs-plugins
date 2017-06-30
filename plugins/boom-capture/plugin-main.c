@@ -82,7 +82,7 @@ bool obs_module_load(void)
 
 	win8_or_above = ver.major > 6 || (ver.major == 6 && ver.minor >= 2);
 
-	obs_register_source(&window_capture_info);
+	//obs_register_source(&window_capture_info);
 
 	init_hooks_thread = CreateThread(NULL, 0, init_hooks, NULL, 0, NULL);
 	obs_register_source(&bcu_info);
