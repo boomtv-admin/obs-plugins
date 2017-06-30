@@ -2142,7 +2142,7 @@ void bcu_render_border(struct bcu *gc, float width, float height)
 	gs_technique_begin_pass(gc->tech, 0);
 
 	gs_matrix_push();
-	float size = gc->thickness + 1;
+	float size = gc->thickness;
 	gs_matrix_translate3f(-size, -size, 0);
 	gs_matrix_scale3f(width + (size * 2), height + (size * 2), 1.0f);
 	gs_load_vertexbuffer(gc->box);
