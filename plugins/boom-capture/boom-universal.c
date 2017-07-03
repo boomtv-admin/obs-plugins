@@ -168,12 +168,14 @@ struct graphics_offsets offsets64 = { 0 };
 
 static inline bool use_anticheat(struct bcu *gc)
 {
+	info("XXXXXXXXXXXXX use_anticheat start");
 	return false;
 }
 
 static inline HANDLE open_mutex_plus_id(struct bcu *gc,
 	const wchar_t *name, DWORD id)
 {
+	info("XXXXXXXXXXXXX open_mutex_plus_id start");
 	wchar_t new_name[64];
 	_snwprintf(new_name, 64, L"%s%lu", name, id);
 	return gc->is_app
@@ -184,12 +186,14 @@ static inline HANDLE open_mutex_plus_id(struct bcu *gc,
 static inline HANDLE open_mutex_gc(struct bcu *gc,
 	const wchar_t *name)
 {
+	info("XXXXXXXXXXXXX open_mutex_gc start");
 	return open_mutex_plus_id(gc, name, gc->process_id);
 }
 
 static inline HANDLE open_event_plus_id(struct bcu *gc,
 	const wchar_t *name, DWORD id)
 {
+	info("XXXXXXXXXXXXX open_event_plus_id start");
 	wchar_t new_name[64];
 	_snwprintf(new_name, 64, L"%s%lu", name, id);
 	return gc->is_app
@@ -200,17 +204,18 @@ static inline HANDLE open_event_plus_id(struct bcu *gc,
 static inline HANDLE open_event_gc(struct bcu *gc,
 	const wchar_t *name)
 {
+	info("XXXXXXXXXXXXX open_event_gc start");
 	return open_event_plus_id(gc, name, gc->process_id);
 }
 
 static inline HANDLE open_map_plus_id(struct bcu *gc,
 	const wchar_t *name, DWORD id)
 {
+	info("XXXXXXXXXXXXX open_map_plus_id start");
 	wchar_t new_name[64];
 	_snwprintf(new_name, 64, L"%s%lu", name, id);
 
 	debug("map id: %S", new_name);
-
 	return gc->is_app
 		? open_app_map(gc->app_sid, new_name)
 		: OpenFileMappingW(GC_MAPPING_FLAGS, false, new_name);
@@ -218,6 +223,7 @@ static inline HANDLE open_map_plus_id(struct bcu *gc,
 
 static inline HANDLE open_hook_info(struct bcu *gc)
 {
+	info("XXXXXXXXXXXXX open_hook_info start");
 	return open_map_plus_id(gc, SHMEM_HOOK_INFO, gc->process_id);
 }
 
@@ -270,6 +276,7 @@ char* bcu_get_json_data_from_file(const char* path)
 		fclose(f);
 	}
 
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_get_json_data_from_file end");
 	return result;
 }
 
@@ -279,8 +286,14 @@ bool bcu_find_id_helper(void *data, size_t idx, obs_hotkey_t *hotkey)
 {
 	blog(LOG_WARNING, "bcu_find_id_helper");
 
-	if (bcu_assert("bcu_find_id_helper", data) == false) return false;
-	if (bcu_assert("bcu_find_id_helper", hotkey) == false) return false;
+	if (bcu_assert("bcu_find_id_helper", data) == false) {
+		blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_find_id_helper end 1");
+		return false;
+	}
+	if (bcu_assert("bcu_find_id_helper", hotkey) == false) {
+		blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_find_id_helper end 2");
+		return false;
+	}
 
 	char buf_show_hide[256] = "libobs.show_scene_item.";
 	char buf_reset[256] = "BCU.reset_position.";
@@ -294,14 +307,21 @@ bool bcu_find_id_helper(void *data, size_t idx, obs_hotkey_t *hotkey)
 	{
 		aa->show_id = hotkey->id;
 		aa->hide_id = hotkey->pair_partner_id;
-		if ((aa->show_id >= 0) && (aa->hide_id >= 0) && (aa->reset_id >= 0)) return false;
+		if ((aa->show_id >= 0) && (aa->hide_id >= 0) && (aa->reset_id >= 0)) {
+			blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_find_id_helper end 3");
+			return false;
+		}
 	}
 	if (strcmp(hotkey->name, buf_reset) == 0)
 	{
 		aa->reset_id = hotkey->id;
-		if ((aa->show_id >= 0) && (aa->hide_id >= 0) && (aa->reset_id >= 0)) return false;
+		if ((aa->show_id >= 0) && (aa->hide_id >= 0) && (aa->reset_id >= 0)) {
+			blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_find_id_helper end 4");
+			return false;
+		}
 	}
 
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_properties end 5");
 	return true;
 }
 
@@ -309,6 +329,7 @@ bool bcu_find_id_helper(void *data, size_t idx, obs_hotkey_t *hotkey)
 //Get current scene
 struct obs_scene* bcu_get_scene(void *data)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_get_scene start");
 	blog(LOG_WARNING, "bcu_get_scene");
 
 	if (bcu_assert("bcu_get_scene", data) == false) return NULL;
@@ -348,14 +369,16 @@ struct obs_scene* bcu_get_scene(void *data)
 
 	blog(LOG_WARNING, "		scene_name = %s", scene_name);
 	scene_src = obs_get_source_by_name(scene_name);
-	if (!scene_src) return NULL;
+	if (!scene_src) {
+		blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_get_scene end 1");
+		return NULL;
+	}
 
 	scene = obs_scene_from_source(scene_src);
 	blog(LOG_WARNING, "		get scene from source");
 
 	obs_source_release(scene_src);
 	blog(LOG_WARNING, "		release scene_src");
-
 	return scene;
 }
 
@@ -363,6 +386,7 @@ struct obs_scene* bcu_get_scene(void *data)
 //Get scene item
 struct obs_scene_item* bcu_get_scene_item(void *data)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_get_scene_item start");
 	blog(LOG_WARNING, "bcu_get_scene_item");
 
 	if (bcu_assert("bcu_get_scene_item", data) == false) return NULL;
@@ -372,7 +396,10 @@ struct obs_scene_item* bcu_get_scene_item(void *data)
 	struct obs_scene_item * item;
 
 	if (scene) item = scene->first_item;
-	else return NULL;
+	else {
+		blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_get_scene_item end 1");
+		return NULL;
+	}
 
 	while (item)
 	{
@@ -386,6 +413,7 @@ struct obs_scene_item* bcu_get_scene_item(void *data)
 		item = item->next;
 	}
 
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_get_scene_item end 2");
 	return item;
 }
 
@@ -393,6 +421,7 @@ struct obs_scene_item* bcu_get_scene_item(void *data)
 //Set default position
 void bcu_set_default_postition(void *data)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_set_default_postition start");
 	blog(LOG_WARNING, "bcu_set_default_postition");
 
 	if (bcu_assert("bcu_set_default_postition", data) == false) return;
@@ -444,15 +473,20 @@ void bcu_set_default_postition(void *data)
 	}
 
 	item = NULL;
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_set_default_postition end");
 }
 
 
 //Reset dimensions
 void bcu_set_scale(void *data)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_set_scale start");
 	blog(LOG_WARNING, "bcu_set_scale");
 
-	if (bcu_assert("bcu_set_scale", data) == false) return;
+	if (bcu_assert("bcu_set_scale", data) == false) {
+		blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_set_scale end 1");
+		return;
+	}
 
 	struct bcu *gc = data;
 	struct obs_scene_item * item = bcu_get_scene_item(data);
@@ -491,12 +525,14 @@ void bcu_set_scale(void *data)
 	}
 
 	item = NULL;
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_set_scale end 2");
 }
 
 
 //Hotkey positioning
 static bool bcu_hotkey_pos(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotkey, bool pressed)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_hotkey_pos start");
 	blog(LOG_WARNING, "bcu_hotkey_pos");
 
 	if (bcu_assert("bcu_hotkey_pos", data) == false) return false;
@@ -511,9 +547,11 @@ static bool bcu_hotkey_pos(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotk
 	if (pressed && gc)
 	{
 		bcu_set_default_postition(gc);
+		blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_hotkey_pos end 1");
 		return true;
 	}
 
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_hotkey_pos end 2");
 	return false;
 }
 
@@ -521,6 +559,7 @@ static bool bcu_hotkey_pos(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotk
 //Init
 void bcu_init(void *data)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_init start");
 	blog(LOG_WARNING, "bcu_init");
 
 	if (bcu_assert("bcu_init", data) == false) return;
@@ -540,8 +579,14 @@ void bcu_init(void *data)
 	struct obs_scene * scene = bcu_get_scene(data);
 	struct obs_scene_item * item = bcu_get_scene_item(data);
 
-	if (bcu_assert("bcu_init", scene) == false) return;
-	if (bcu_assert("bcu_init", item) == false) return;
+	if (bcu_assert("bcu_init", scene) == false) {
+		blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_init end 1");
+		return;
+	}
+	if (bcu_assert("bcu_init", item) == false) {
+		blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_init end 2");
+		return;
+	}
 
 	//Set unvisible
 	//obs_sceneitem_set_visible(item, false);
@@ -583,6 +628,7 @@ void bcu_init(void *data)
 
 	item = NULL;
 	scene = NULL;
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_init end 3");
 }
 
 
@@ -606,20 +652,24 @@ static inline enum gs_color_format convert_format(uint32_t format)
 
 static void close_handle(HANDLE *p_handle)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX close_handle start");
 	HANDLE handle = *p_handle;
 	if (handle) {
 		if (handle != INVALID_HANDLE_VALUE)
 			CloseHandle(handle);
 		*p_handle = NULL;
 	}
+	blog(LOG_WARNING, "XXXXXXXXXXXXX close_handle end");
 }
 
 
 static inline HMODULE kernel32(void)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX kernel32 start");
 	static HMODULE kernel32_handle = NULL;
 	if (!kernel32_handle)
 		kernel32_handle = GetModuleHandleW(L"kernel32");
+	blog(LOG_WARNING, "XXXXXXXXXXXXX kernel32 end");
 	return kernel32_handle;
 }
 
@@ -627,11 +677,13 @@ static inline HMODULE kernel32(void)
 static inline HANDLE open_process(DWORD desired_access, bool inherit_handle,
 	DWORD process_id)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX open_process start");
 	static HANDLE(WINAPI *open_process_proc)(DWORD, BOOL, DWORD) = NULL;
 	if (!open_process_proc)
 		open_process_proc = get_obfuscated_func(kernel32(),
 			"NuagUykjcxr", 0x1B694B59451ULL);
 
+	blog(LOG_WARNING, "XXXXXXXXXXXXX open_process end");
 	return open_process_proc(desired_access, inherit_handle, process_id);
 }
 
@@ -639,6 +691,7 @@ static inline HANDLE open_process(DWORD desired_access, bool inherit_handle,
 // Stop capturing
 static void stop_capture(struct bcu *gc)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX stop_capture start");
 	if (bcu_assert("stop_capture", gc) == false) return;
 
 	ipc_pipe_server_free(&gc->pipe);
@@ -687,21 +740,25 @@ static void stop_capture(struct bcu *gc)
 	gc->wait_for_target_startup = false;
 	gc->active = false;
 	gc->capturing = false;
+	blog(LOG_WARNING, "XXXXXXXXXXXXX stop_capture end");
 }
 
 
 static inline void free_config(struct bcu_config *config)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX free_config start");
 	if (bcu_assert("free_config", config) == false) return;
 
 	bfree(config->title_first);
 	bfree(config->title_second);
 	memset(config, 0, sizeof(*config));
+	blog(LOG_WARNING, "XXXXXXXXXXXXX free_config end");
 }
 
 
 static void bcu_destroy(void *data)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_destroy start");
 	if (bcu_assert("bcu_destroy", data) == false) return;
 	struct bcu *gc = data;
 
@@ -722,11 +779,13 @@ static void bcu_destroy(void *data)
 	obs_hotkey_unregister(gc->toggle_position);
 	free_config(&gc->config);
 	bfree(gc);
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_destroy end");
 }
 
 
 static inline void get_config(struct bcu_config *cfg, obs_data_t *settings)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX get_config start");
 	if (bcu_assert("get_config", cfg) == false) return;
 	if (bcu_assert("get_config", settings) == false) return;
 
@@ -746,6 +805,7 @@ static inline void get_config(struct bcu_config *cfg, obs_data_t *settings)
 	cfg->limit_framerate = obs_data_get_bool(settings, SETTING_LIMIT_FRAMERATE);
 	cfg->border_color = (uint32_t)obs_data_get_int(settings, SETTING_BORDER_COLOR);
 	cfg->border_thickness = obs_data_get_int(settings, SETTING_BORDER_THICKNESS);
+	blog(LOG_WARNING, "XXXXXXXXXXXXX get_config end");
 }
 
 
@@ -760,27 +820,32 @@ static inline int s_cmp(const char *str1, const char *str2)
 
 static inline bool capture_needs_reset(struct bcu_config *cfg1, struct bcu_config *cfg2)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX capture_needs_reset start");
 	if (bcu_assert("capture_needs_reset", cfg1) == false) return false;
 	if (bcu_assert("capture_needs_reset", cfg2) == false) return false;
 
 
 	if ((s_cmp(cfg1->title_first, cfg2->title_first) != 0) || (s_cmp(cfg1->title_second, cfg2->title_second) != 0))
 	{
+		blog(LOG_WARNING, "XXXXXXXXXXXXX capture_needs_reset end 1");
 		return true;
 	}
 
 	else if (cfg1->force_shmem != cfg2->force_shmem)
 	{
+		blog(LOG_WARNING, "XXXXXXXXXXXXX capture_needs_reset end 2");
 		return true;
 
 	}
 
 	else if (cfg1->limit_framerate != cfg2->limit_framerate)
 	{
+		blog(LOG_WARNING, "XXXXXXXXXXXXX capture_needs_reset end 3");
 		return true;
 
 	}
 
+	blog(LOG_WARNING, "XXXXXXXXXXXXX capture_needs_reset end 4");
 	return false;
 }
 
@@ -788,6 +853,7 @@ static inline bool capture_needs_reset(struct bcu_config *cfg1, struct bcu_confi
 // Module update
 static void bcu_update(void *data, obs_data_t *settings)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_update start");
 	struct bcu *gc = data;
 	struct bcu_config cfg;
 
@@ -828,6 +894,7 @@ static void bcu_update(void *data, obs_data_t *settings)
 	{
 		gc->window = NULL;
 	}
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_update end");
 }
 
 
@@ -836,8 +903,15 @@ extern void wait_for_hook_initialization(void);
 // Module create
 static void *bcu_create(obs_data_t *settings, obs_source_t *source)
 {
-	if (bcu_assert("bcu_create", settings) == false) return NULL;
-	if (bcu_assert("bcu_create", source) == false) return NULL;
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_create start");
+	if (bcu_assert("bcu_create", settings) == false) {
+		blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_create end 1");
+		return NULL;
+	}
+	if (bcu_assert("bcu_create", source) == false) {
+		blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_create end 2");
+		return NULL;
+	}
 
 	struct bcu *gc = bzalloc(sizeof(*gc));
 
@@ -895,6 +969,7 @@ static void *bcu_create(obs_data_t *settings, obs_source_t *source)
 
 
 	bcu_update(gc, settings);
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_create end 4");
 	return gc;
 }
 
@@ -908,6 +983,7 @@ static void *bcu_create(obs_data_t *settings, obs_source_t *source)
 static bool check_file_integrity(struct bcu *gc, const char *file,
 	const char *name)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX check_file_integrity start");
 	DWORD error;
 	HANDLE handle;
 	wchar_t *w_file = NULL;
@@ -946,12 +1022,14 @@ static bool check_file_integrity(struct bcu *gc, const char *file,
 			STOP_BEING_BAD, file, error);
 	}
 
+	blog(LOG_WARNING, "XXXXXXXXXXXXX check_file_integrity end");
 	return false;
 }
 
 
 static inline bool is_64bit_windows(void)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX is_64bit_windows start");
 #ifdef _WIN64
 	return true;
 #else
@@ -964,6 +1042,7 @@ static inline bool is_64bit_windows(void)
 
 static inline bool is_64bit_process(HANDLE process)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX is_64bit_process start");
 	BOOL x86 = true;
 	if (is_64bit_windows()) {
 		bool success = !!IsWow64Process(process, &x86);
@@ -972,12 +1051,14 @@ static inline bool is_64bit_process(HANDLE process)
 		}
 	}
 
+	blog(LOG_WARNING, "XXXXXXXXXXXXX is_64bit_process end");
 	return !x86;
 }
 
 
 static inline bool open_target_process(struct bcu *gc)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX open_target_process start");
 	gc->target_process = open_process(
 		PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
 		false, gc->process_id);
@@ -991,12 +1072,14 @@ static inline bool open_target_process(struct bcu *gc)
 	if (gc->is_app) {
 		gc->app_sid = get_app_sid(gc->target_process);
 	}
+	blog(LOG_WARNING, "XXXXXXXXXXXXX open_target_process end");
 	return true;
 }
 
 
 static inline bool init_keepalive(struct bcu *gc)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX init_keepalive start");
 	wchar_t new_name[64];
 	_snwprintf(new_name, 64, L"%s%lu", WINDOW_HOOK_KEEPALIVE,
 		gc->process_id);
@@ -1007,6 +1090,7 @@ static inline bool init_keepalive(struct bcu *gc)
 		return false;
 	}
 
+	blog(LOG_WARNING, "XXXXXXXXXXXXX init_keepalive end");
 	return true;
 }
 
@@ -1014,16 +1098,19 @@ static inline bool init_keepalive(struct bcu *gc)
 //Returns the last Win32 error, in string format. Returns an empty string if there is no error.
 char* GetLastErrorAsString()
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX GetLastErrorAsString start");
 	char* buf = malloc(256);
 	FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM, 0, GetLastError(),
 		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), buf, 256, 0);
 
+	blog(LOG_WARNING, "XXXXXXXXXXXXX GetLastErrorAsString end");
 	return buf;
 }
 
 
 static inline bool init_texture_mutexes(struct bcu *gc)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX init_texture_mutexes start");
 	gc->texture_mutexes[0] = open_mutex_gc(gc, MUTEX_TEXTURE1);
 	gc->texture_mutexes[1] = open_mutex_gc(gc, MUTEX_TEXTURE2);
 
@@ -1044,6 +1131,7 @@ static inline bool init_texture_mutexes(struct bcu *gc)
 		return false;
 	}
 
+	blog(LOG_WARNING, "XXXXXXXXXXXXX init_texture_mutexes end");
 	return true;
 }
 
@@ -1051,6 +1139,7 @@ static inline bool init_texture_mutexes(struct bcu *gc)
 /* if there's already a hook in the process, then signal and start */
 static inline bool attempt_existing_hook(struct bcu *gc)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX attempt_existing_hook start");
 	if (bcu_assert("attempt_existing_hook", gc) == false) return false;
 
 	gc->hook_restart = open_event_gc(gc, EVENT_CAPTURE_RESTART);
@@ -1061,12 +1150,14 @@ static inline bool attempt_existing_hook(struct bcu *gc)
 		return true;
 	}
 
+	blog(LOG_WARNING, "XXXXXXXXXXXXX attempt_existing_hook end");
 	return false;
 }
 
 
 static inline void reset_frame_interval(struct bcu *gc)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX reset_frame_interval start");
 	if (bcu_assert("reset_frame_interval", gc) == false) return;
 
 	struct obs_video_info ovi;
@@ -1084,11 +1175,13 @@ static inline void reset_frame_interval(struct bcu *gc)
 	}
 
 	gc->global_hook_info->frame_interval = interval;
+	blog(LOG_WARNING, "XXXXXXXXXXXXX reset_frame_interval end");
 }
 
 
 static inline bool init_hook_info(struct bcu *gc)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX init_hook_info start");
 	gc->global_hook_info_map = open_hook_info(gc);
 	if (!gc->global_hook_info_map) {
 		warn("init_hook_info: get_hook_info failed: %lu",
@@ -1118,6 +1211,7 @@ static inline bool init_hook_info(struct bcu *gc)
 	}
 	obs_leave_graphics();
 
+	blog(LOG_WARNING, "XXXXXXXXXXXXX init_hook_info end");
 	return true;
 }
 
@@ -1131,6 +1225,7 @@ static void pipe_log(void *param, uint8_t *data, size_t size)
 
 static inline bool init_pipe(struct bcu *gc)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX init_pipe start");
 	char name[64];
 	sprintf(name, "%s%lu", PIPE_NAME, gc->process_id);
 
@@ -1139,12 +1234,14 @@ static inline bool init_pipe(struct bcu *gc)
 		return false;
 	}
 
+	blog(LOG_WARNING, "XXXXXXXXXXXXX init_pipe end");
 	return true;
 }
 
 
 static inline int inject_library(HANDLE process, const wchar_t *dll)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX inject_library start");
 	return inject_library_obf(process, dll,
 		"D|hkqkW`kl{k\\osofj", 0xa178ef3655e5ade7,
 		"[uawaRzbhh{tIdkj~~", 0x561478dbd824387c,
@@ -1157,6 +1254,7 @@ static inline int inject_library(HANDLE process, const wchar_t *dll)
 static inline bool hook_direct(struct bcu *gc,
 	const char *hook_path_rel)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX hook_direct start");
 	wchar_t hook_path_abs_w[MAX_PATH];
 	wchar_t *hook_path_rel_w;
 	wchar_t *path_ret;
@@ -1191,6 +1289,7 @@ static inline bool hook_direct(struct bcu *gc,
 		return false;
 	}
 
+	blog(LOG_WARNING, "XXXXXXXXXXXXX hook_direct end");
 	return true;
 }
 
@@ -1198,6 +1297,7 @@ static inline bool hook_direct(struct bcu *gc,
 static inline bool create_inject_process(struct bcu *gc,
 	const char *inject_path, const char *hook_dll)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX create_inject_process start");
 	wchar_t *command_line_w = malloc(4096 * sizeof(wchar_t));
 	wchar_t *inject_path_w;
 	wchar_t *hook_dll_w;
@@ -1230,12 +1330,14 @@ static inline bool create_inject_process(struct bcu *gc,
 	free(command_line_w);
 	bfree(inject_path_w);
 	bfree(hook_dll_w);
+	blog(LOG_WARNING, "XXXXXXXXXXXXX create_inject_process end");
 	return success;
 }
 
 
 static inline bool inject_hook(struct bcu *gc)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX inject_hook start");
 	bool matching_architecture;
 	bool success = false;
 	const char *hook_dll;
@@ -1279,12 +1381,14 @@ static inline bool inject_hook(struct bcu *gc)
 cleanup:
 	bfree(inject_path);
 	bfree(hook_path);
+	blog(LOG_WARNING, "XXXXXXXXXXXXX inject_hook end");
 	return success;
 }
 
 
 static inline bool init_events(struct bcu *gc)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX init_events start");
 	if (!gc->hook_restart) {
 		gc->hook_restart = open_event_gc(gc, EVENT_CAPTURE_RESTART);
 		if (!gc->hook_restart) {
@@ -1330,18 +1434,21 @@ static inline bool init_events(struct bcu *gc)
 		}
 	}
 
+	blog(LOG_WARNING, "XXXXXXXXXXXXX init_events end");
 	return true;
 }
 
 
 static bool target_suspended(struct bcu *gc)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX target_suspended start");
 	return thread_is_suspended(gc->process_id, gc->thread_id);
 }
 
 
 static bool init_hook(struct bcu *gc)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX init_hook start");
 	struct dstr exe = { 0 };
 
 	if (get_window_exe(&exe, gc->next_window)) {
@@ -1400,6 +1507,7 @@ static bool init_hook(struct bcu *gc)
 
 static void setup_window(struct bcu *gc, HWND window)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX setup_window start");
 	HANDLE hook_restart;
 	HANDLE process;
 
@@ -1435,11 +1543,13 @@ static void setup_window(struct bcu *gc, HWND window)
 	else {
 		gc->next_window = window;
 	}
+	blog(LOG_WARNING, "XXXXXXXXXXXXX setup_window end");
 }
 
 
 static void get_selected_window(struct bcu *gc)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX get_selected_window start");
 	HWND window;
 
 	if ((strcmpi(gc->config.title_first, "dwm") == 0) || (strcmpi(gc->config.title_second, "dwm") == 0))
@@ -1483,11 +1593,13 @@ static void get_selected_window(struct bcu *gc)
 		//gc->use2D = false;
 		//info("No ReplayView window!");
 	}
+	blog(LOG_WARNING, "XXXXXXXXXXXXX get_selected_window end");
 }
 
 
 static void try_hook(struct bcu *gc)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX try_hook start");
 	get_selected_window(gc);
 
 	if (gc->next_window)
@@ -1515,6 +1627,7 @@ static void try_hook(struct bcu *gc)
 	else {
 		gc->active = false;
 	}
+	blog(LOG_WARNING, "XXXXXXXXXXXXX try_hook end");
 }
 
 
@@ -1527,6 +1640,7 @@ enum capture_result {
 
 static inline enum capture_result init_capture_data(struct bcu *gc)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX init_capture_data start");
 	gc->cx = gc->global_hook_info->cx;
 	gc->cy = gc->global_hook_info->cy;
 	gc->pitch = gc->global_hook_info->pitch;
@@ -1560,6 +1674,7 @@ static inline enum capture_result init_capture_data(struct bcu *gc)
 		return CAPTURE_FAIL;
 	}
 
+	blog(LOG_WARNING, "XXXXXXXXXXXXX init_capture_data end");
 	return CAPTURE_SUCCESS;
 }
 
@@ -1570,12 +1685,14 @@ static inline enum capture_result init_capture_data(struct bcu *gc)
 
 static inline uint32_t convert_5_to_8bit(uint16_t val)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX convert_5_to_8bit start");
 	return (uint32_t)((double)(val & 0x1F) * (255.0 / 31.0));
 }
 
 
 static inline uint32_t convert_6_to_8bit(uint16_t val)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX convert_6_to_8bit start");
 	return (uint32_t)((double)(val & 0x3F) * (255.0 / 63.0));
 }
 
@@ -1583,6 +1700,7 @@ static inline uint32_t convert_6_to_8bit(uint16_t val)
 static void copy_b5g6r5_tex(struct bcu *gc, int cur_texture,
 	uint8_t *data, uint32_t pitch)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX copy_b5g6r5_tex start");
 	uint8_t *input = gc->texture_buffers[cur_texture];
 	uint32_t gc_cx = gc->cx;
 	uint32_t gc_cy = gc->cy;
@@ -1652,12 +1770,14 @@ static void copy_b5g6r5_tex(struct bcu *gc, int cur_texture,
 			_mm_store_si128(pixels_dest, pixels_result);
 		}
 	}
+	blog(LOG_WARNING, "XXXXXXXXXXXXX copy_b5g6r5_tex end");
 }
 
 
 static void copy_b5g5r5a1_tex(struct bcu *gc, int cur_texture,
 	uint8_t *data, uint32_t pitch)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX copy_b5g5r5a1_tex start");
 	uint8_t *input = gc->texture_buffers[cur_texture];
 	uint32_t gc_cx = gc->cx;
 	uint32_t gc_cy = gc->cy;
@@ -1740,12 +1860,14 @@ static void copy_b5g5r5a1_tex(struct bcu *gc, int cur_texture,
 			_mm_store_si128(pixels_dest, pixels_result);
 		}
 	}
+	blog(LOG_WARNING, "XXXXXXXXXXXXX copy_b5g5r5a1_tex end");
 }
 
 
 static inline void copy_16bit_tex(struct bcu *gc, int cur_texture,
 	uint8_t *data, uint32_t pitch)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX copy_16bit_tex start");
 	if (gc->global_hook_info->format == DXGI_FORMAT_B5G5R5A1_UNORM) {
 		copy_b5g5r5a1_tex(gc, cur_texture, data, pitch);
 
@@ -1753,19 +1875,23 @@ static inline void copy_16bit_tex(struct bcu *gc, int cur_texture,
 	else if (gc->global_hook_info->format == DXGI_FORMAT_B5G6R5_UNORM) {
 		copy_b5g6r5_tex(gc, cur_texture, data, pitch);
 	}
+	blog(LOG_WARNING, "XXXXXXXXXXXXX copy_16bit_tex end");
 }
 
 
 static void copy_shmem_tex(struct bcu *gc)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX copy_shmem_tex start");
 	int cur_texture = gc->shmem_data->last_tex;
 	HANDLE mutex = NULL;
 	uint32_t pitch;
 	int next_texture;
 	uint8_t *data;
 
-	if (cur_texture < 0 || cur_texture > 1)
+	if (cur_texture < 0 || cur_texture > 1) {
+		blog(LOG_WARNING, "XXXXXXXXXXXXX copy_shmem_tex end 1");
 		return;
+	}
 
 	next_texture = cur_texture == 1 ? 0 : 1;
 
@@ -1779,6 +1905,7 @@ static void copy_shmem_tex(struct bcu *gc)
 
 	}
 	else {
+		blog(LOG_WARNING, "XXXXXXXXXXXXX copy_shmem_tex end 2");
 		return;
 	}
 
@@ -1807,11 +1934,13 @@ static void copy_shmem_tex(struct bcu *gc)
 	}
 
 	ReleaseMutex(mutex);
+	blog(LOG_WARNING, "XXXXXXXXXXXXX copy_shmem_tex end 3");
 }
 
 
 static inline bool is_16bit_format(uint32_t format)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX is_16bit_format start");
 	return format == DXGI_FORMAT_B5G5R5A1_UNORM ||
 		format == DXGI_FORMAT_B5G6R5_UNORM;
 }
@@ -1819,6 +1948,7 @@ static inline bool is_16bit_format(uint32_t format)
 
 static inline bool init_shmem_capture(struct bcu *gc)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX init_shmem_capture start");
 	enum gs_color_format format;
 
 	gc->texture_buffers[0] =
@@ -1842,12 +1972,14 @@ static inline bool init_shmem_capture(struct bcu *gc)
 	}
 
 	gc->copy_texture = copy_shmem_tex;
+	blog(LOG_WARNING, "XXXXXXXXXXXXX init_shmem_capture end");
 	return true;
 }
 
 
 static inline bool init_shtex_capture(struct bcu *gc)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX init_shtex_capture start");
 	obs_enter_graphics();
 	gs_texture_destroy(gc->texture);
 	gc->texture = gs_texture_open_shared(gc->shtex_data->tex_handle);
@@ -1858,12 +1990,14 @@ static inline bool init_shtex_capture(struct bcu *gc)
 		return false;
 	}
 
+	blog(LOG_WARNING, "XXXXXXXXXXXXX init_shtex_capture end");
 	return true;
 }
 
 
 static bool start_capture(struct bcu *gc)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX start_capture start");
 	debug("Starting capture");
 
 	if (gc->global_hook_info->type == CAPTURE_TYPE_MEMORY) {
@@ -1883,14 +2017,18 @@ static bool start_capture(struct bcu *gc)
 		info("shared texture capture successful");
 	}
 
+	blog(LOG_WARNING, "XXXXXXXXXXXXX start_capture end");
 	return true;
 }
 
 
 static inline bool capture_valid(struct bcu *gc)
 {
-	if (!gc->dwm_capture && !IsWindow(gc->window))
+	blog(LOG_WARNING, "XXXXXXXXXXXXX capture_valid start");
+	if (!gc->dwm_capture && !IsWindow(gc->window)) {
+		blog(LOG_WARNING, "XXXXXXXXXXXXX capture_valid end 1");
 		return false;
+	}
 
 	// if the window title is still the same
 	struct dstr cur_class = { 0 };
@@ -1898,9 +2036,11 @@ static inline bool capture_valid(struct bcu *gc)
 
 	if (dstr_cmpi(&cur_class, gc->config.title_first) != 0)
 	{
+		blog(LOG_WARNING, "XXXXXXXXXXXXX capture_valid end 2");
 		return false;
 	}
 
+	blog(LOG_WARNING, "XXXXXXXXXXXXX capture_valid end 3");
 	return !object_signalled(gc->target_process);
 }
 
@@ -1908,6 +2048,7 @@ static inline bool capture_valid(struct bcu *gc)
 // if the window title is still the same
 static inline bool is_valid(void *data)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX is_valid start");
 	struct bcu *gc = data;
 	bool valid = false;
 
@@ -1920,12 +2061,14 @@ static inline bool is_valid(void *data)
 			valid = true;
 		}
 	}
+	blog(LOG_WARNING, "XXXXXXXXXXXXX is_valid end");
 	return valid;
 }
 
 
 static void check_foreground_window(struct bcu *gc, float seconds)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX check_foreground_window start");
 	// Hides the cursor if the user isn't actively in the game
 	gc->cursor_check_time += seconds;
 	if (gc->cursor_check_time >= 0.1f) {
@@ -1938,11 +2081,13 @@ static void check_foreground_window(struct bcu *gc, float seconds)
 			gc->cursor_hidden = false;
 		gc->cursor_check_time = 0.0f;
 	}
+	blog(LOG_WARNING, "XXXXXXXXXXXXX check_foreground_window end");
 }
 
 // Module item tick
 static void bcu_tick(void *data, float seconds)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_tick start");
 	if (bcu_assert("bcu_tick", data) == false) return;
 
 	struct bcu *gc = data;
@@ -1957,6 +2102,7 @@ static void bcu_tick(void *data, float seconds)
 					stop_capture(gc);
 				gc->showing = false;
 			}
+			blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_tick end 1");
 			return;
 		}
 		else if (!gc->showing) {
@@ -2051,18 +2197,23 @@ static void bcu_tick(void *data, float seconds)
 	}
 	else
 	{
-		if (!obs_source_showing(gc->source))
+		if (!obs_source_showing(gc->source)) {
+			blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_tick end 3");
 			return;
+		}
 
 		if (!gc->window || !IsWindow(gc->window) || !is_valid(data)) {
-			if (!gc->config.title_second)
+			if (!gc->config.title_second) { 
+				blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_tick end 4");
 				return;
+			}
 
 			gc->window = find_window(INCLUDE_MINIMIZED, WINDOW_PRIORITY_TITLE, "", gc->config.title_second, "");
 			if (!gc->window) {
 				if (gc->capture.valid)
 					dc_capture_free(&gc->capture);
 				gc->use2D = false;
+				blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_tick end 5");
 				return;
 			}
 
@@ -2070,6 +2221,7 @@ static void bcu_tick(void *data, float seconds)
 
 		}
 		else if (IsIconic(gc->window)) {
+			blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_tick end 6");
 			return;
 		}
 
@@ -2100,21 +2252,24 @@ static void bcu_tick(void *data, float seconds)
 		dc_capture_capture(&gc->capture, gc->window);
 		obs_leave_graphics();
 	}
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_tick end 7");
 }
 
 
 // Render cursor
 static inline void bcu_render_cursor(struct bcu *gc)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_render_cursor start");
 	POINT p = { 0 };
 
 	if (bcu_assert("bcu_render_cursor", gc) == false) return;
 
 	HWND window;
 
-	if (!gc->global_hook_info->base_cx ||
-		!gc->global_hook_info->base_cy)
+	if (!gc->global_hook_info->base_cx || !gc->global_hook_info->base_cy) {
+		blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_render_cursor end 1");
 		return;
+	}
 
 	window = !!gc->global_hook_info->window
 		? (HWND)(uintptr_t)gc->global_hook_info->window
@@ -2130,11 +2285,13 @@ static inline void bcu_render_cursor(struct bcu *gc)
 	cursor_draw(&gc->cursor_data, -p.x, -p.y, x_scale, y_scale,
 		gc->global_hook_info->base_cx,
 		gc->global_hook_info->base_cy);
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_render_cursor end 2");
 }
 
 
 void bcu_render_border(struct bcu *gc, float width, float height)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_render_border start");
 	struct vec4 colorVal;
 	vec4_from_rgba(&colorVal, gc->colorVal);
 	gs_effect_set_vec4(gc->color, &colorVal);
@@ -2152,12 +2309,14 @@ void bcu_render_border(struct bcu *gc, float width, float height)
 	gs_technique_end_pass(gc->tech);
 	gs_technique_end(gc->tech);
 	gs_load_vertexbuffer(NULL);
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_render_border end");
 }
 
 
 // Module item render
 static void bcu_render(void *data, gs_effect_t *effect)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_render start");
 	if (bcu_assert("bcu_render", data) == false) return;
 
 	struct bcu *gc = data;
@@ -2169,8 +2328,10 @@ static void bcu_render(void *data, gs_effect_t *effect)
 
 	if (!gc->use2D)
 	{
-		if (!gc->texture || !gc->active)
+		if (!gc->texture || !gc->active) {
+			blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_render end 1");
 			return;
+		}
 
 		bcu_render_border(gc, width, height);
 
@@ -2199,21 +2360,25 @@ static void bcu_render(void *data, gs_effect_t *effect)
 		dc_capture_render(&gc->capture, obs_get_base_effect(OBS_EFFECT_OPAQUE));
 		UNUSED_PARAMETER(effect);
 	}
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_render end 2");
 }
 
 
 // Module item width
 static uint32_t bcu_width(void *data)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_width start");
 	if (bcu_assert("bcu_width", data) == false) return 0;
 	struct bcu *gc = data;
 
 	if (!gc->use2D)
 	{
+		blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_width end 1");
 		return gc->active ? gc->global_hook_info->cx : 0;
 	}
 	else
 	{
+		blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_width end 2");
 		return gc->capture.width;
 	}
 }
@@ -2222,15 +2387,18 @@ static uint32_t bcu_width(void *data)
 // Module item height
 static uint32_t bcu_height(void *data)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_height start");
 	if (bcu_assert("bcu_height", data) == false) return 0;
 	struct bcu *gc = data;
 
 	if (!gc->use2D)
 	{
+		blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_height end 1");
 		return gc->active ? gc->global_hook_info->cy : 0;
 	}
 	else
 	{
+		blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_height end 2");
 		return gc->capture.height;
 	}
 }
@@ -2239,7 +2407,9 @@ static uint32_t bcu_height(void *data)
 // Module name
 static const char *bcu_name(void *unused)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_name start");
 	UNUSED_PARAMETER(unused);
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_name end");
 	return TEXT_BCU;
 }
 
@@ -2249,6 +2419,7 @@ static const char *bcu_name(void *unused)
 // Module default settings
 static void bcu_defaults(obs_data_t *settings)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_name start");
 	if (bcu_assert("bcu_defaults", settings) == false) return;
 
 	obs_data_set_default_bool(settings, SETTING_COMPATIBILITY, false);
@@ -2257,12 +2428,14 @@ static void bcu_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, SETTING_LIMIT_FRAMERATE, false);
 	obs_data_set_default_int(settings, SETTING_BORDER_COLOR, DEFAULT_BORDER_COLOR);
 	obs_data_set_default_int(settings, SETTING_BORDER_THICKNESS, DEFAULT_BORDER_THICKNESS);
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_name end");
 }
 
 
 // Module properties
 static obs_properties_t *bcu_properties(void *data)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_name start");
 	obs_properties_t *ppts = obs_properties_create();
 
 	obs_properties_add_bool(ppts, SETTING_COMPATIBILITY, TEXT_SLI_COMPATIBILITY);
@@ -2273,6 +2446,7 @@ static obs_properties_t *bcu_properties(void *data)
 	obs_properties_add_int_slider(ppts, SETTING_BORDER_THICKNESS, TEXT_BORDER_THICKNESS, 0, 25, 1);
 
 	UNUSED_PARAMETER(data);
+	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_name end");
 	return ppts;
 }
 
