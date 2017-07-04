@@ -33,6 +33,7 @@ extern bool load_graphics_offsets(bool is32bit);
 
 static DWORD WINAPI init_hooks(LPVOID unused)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX init_hooks start");
 	if (USE_HOOK_ADDRESS_CACHE &&
 		cached_versions_match() &&
 		load_cached_graphics_offsets(IS32BIT)) {
@@ -46,11 +47,13 @@ static DWORD WINAPI init_hooks(LPVOID unused)
 	}
 
 	UNUSED_PARAMETER(unused);
+	blog(LOG_WARNING, "XXXXXXXXXXXXX init_hooks end");
 	return 0;
 }
 
 void wait_for_hook_initialization(void)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX wait_for_hook_initialization start");
 	static bool initialized = false;
 
 	if (!initialized) {
@@ -61,12 +64,14 @@ void wait_for_hook_initialization(void)
 		}
 		initialized = true;
 	}
+	blog(LOG_WARNING, "XXXXXXXXXXXXX wait_for_hook_initialization end");
 }
 
 
 // Loading module
 bool obs_module_load(void)
 {
+	blog(LOG_WARNING, "XXXXXXXXXXXXX obs_module_load start");
 	struct win_version_info ver;
 	bool win8_or_above = false;
 	char *config_dir;
@@ -79,6 +84,7 @@ bool obs_module_load(void)
 	}
 
 	get_win_ver(&ver);
+	blog(LOG_WARNING, "XXXXXXXXXXXXX obs_module_load 00");
 
 	win8_or_above = ver.major > 6 || (ver.major == 6 && ver.minor >= 2);
 
@@ -86,6 +92,7 @@ bool obs_module_load(void)
 
 	init_hooks_thread = CreateThread(NULL, 0, init_hooks, NULL, 0, NULL);
 	obs_register_source(&bcu_info);
+	blog(LOG_WARNING, "XXXXXXXXXXXXX obs_module_load end");
 
 	return true;
 }
