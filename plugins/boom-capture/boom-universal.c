@@ -926,7 +926,7 @@ static void *bcu_create(obs_data_t *settings, obs_source_t *source)
 
 	obs_get_video_info(gc->ovi);
 
-	char buf[32];
+	char buf[255];
 	wchar_t wbuf[255];
 
 	gc->dirpath = malloc(255 * sizeof(char));
@@ -940,6 +940,10 @@ static void *bcu_create(obs_data_t *settings, obs_source_t *source)
 
 	WIN32_FIND_DATA FindFileData;
 	HANDLE hFind = FindFirstFile(wbuf, &FindFileData);
+
+	if (lstrlenW(FindFileData.cFileName) >= 255) {
+		blog(LOG_WARNING, "Scene name too long. This will likely cause problems.");
+	}
 
 	WideCharToMultiByte(CP_ACP, 0, FindFileData.cFileName, lstrlenW(FindFileData.cFileName), buf, lstrlenW(FindFileData.cFileName), NULL, NULL);
 	buf[lstrlenW(FindFileData.cFileName)] = '\0';
@@ -962,11 +966,7 @@ static void *bcu_create(obs_data_t *settings, obs_source_t *source)
 	gc->box = gs_render_save();
 	obs_leave_graphics();
 
-
 	gc->started = false;
-
-
-
 
 	bcu_update(gc, settings);
 	blog(LOG_WARNING, "XXXXXXXXXXXXX bcu_create end 4");
