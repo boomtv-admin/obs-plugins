@@ -8,22 +8,19 @@ set(boom-capture_HEADERS
 	graphics-hook-info.h
 	window-helpers.h
 	app-helpers.h
-	cJSON.h
 	dc-capture.h)
 
 set(boom-capture_SOURCES
 	obfuscate.c
 	inject-library.c
 	cursor-capture.c
-	game-capture.c
 	window-helpers.c
 	app-helpers.c
 	load-graphics-offsets.c
 	plugin-main.c
 	vr-window-capture.c
 	boom-universal.c
-	dc-capture.c
-	cJSON.c)
+	dc-capture.c)
 
 add_library(boom-capture MODULE
 	${boom-capture_SOURCES}

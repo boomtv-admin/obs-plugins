@@ -31,21 +31,23 @@ extern bool load_graphics_offsets(bool is32bit);
 
 #define USE_HOOK_ADDRESS_CACHE false
 
-static DWORD WINAPI init_hooks(LPVOID unused)
+static DWORD WINAPI init_hooks(LPVOID param)
 {
+	char *config_path = param;
+
 	if (USE_HOOK_ADDRESS_CACHE &&
 		cached_versions_match() &&
-		load_cached_graphics_offsets(IS32BIT)) {
+		load_cached_graphics_offsets(IS32BIT, config_path)) {
 
-		load_cached_graphics_offsets(!IS32BIT);
+		load_cached_graphics_offsets(!IS32BIT, config_path);
 		obs_register_source(&bcu_info);
 
 	}
-	else if (load_graphics_offsets(IS32BIT)) {
-		load_graphics_offsets(!IS32BIT);
+	else if (load_graphics_offsets(IS32BIT, config_path)) {
+		load_graphics_offsets(!IS32BIT, config_path);
 	}
 
-	UNUSED_PARAMETER(unused);
+	bfree(config_path);
 	return 0;
 }
 
@@ -72,7 +74,7 @@ bool obs_module_load(void)
 	char *config_dir;
 
 	config_dir = obs_module_config_path(NULL);
-	if (config_dir) 
+	if (config_dir)
 	{
 		os_mkdirs(config_dir);
 		bfree(config_dir);
@@ -83,9 +85,15 @@ bool obs_module_load(void)
 	win8_or_above = ver.major > 6 || (ver.major == 6 && ver.minor >= 2);
 
 	//obs_register_source(&window_capture_info);
-
-	init_hooks_thread = CreateThread(NULL, 0, init_hooks, NULL, 0, NULL);
+	
+	char *config_path = obs_module_config_path(NULL);
+	init_hooks_thread = CreateThread(NULL, 0, init_hooks, config_path, 0, NULL);
 	obs_register_source(&bcu_info);
 
 	return true;
+}
+
+void obs_module_unload(void)
+{
+	wait_for_hook_initialization();
 }

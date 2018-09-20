@@ -136,8 +136,6 @@ static inline bool init_mutexes(void)
 		return false;
 	}
 
-
-	hlog("graphics_hook init_mutexes result: %s %i %s %i", MUTEX_TEXTURE1, tex_mutexes[0], MUTEX_TEXTURE2, tex_mutexes[1]);
 	return true;
 }
 
@@ -317,6 +315,7 @@ static inline bool attempt_hook(void)
 
 	if (!d3d9_hooked) {
 		if (!d3d9_hookable()) {
+			DbgOut("no D3D9 hook address found!\n");
 			d3d9_hooked = true;
 		} else {
 			d3d9_hooked = hook_d3d9();
@@ -328,6 +327,7 @@ static inline bool attempt_hook(void)
 
 	if (!dxgi_hooked) {
 		if (!dxgi_hookable()) {
+			DbgOut("no DXGI hook address found!\n");
 			dxgi_hooked = true;
 		} else {
 			dxgi_hooked = hook_dxgi();
@@ -690,7 +690,7 @@ bool capture_init_shmem(struct shmem_data **data, HWND window,
 	uint32_t  tex_size       = cy * pitch;
 	uint32_t  aligned_header = ALIGN(sizeof(struct shmem_data), 32);
 	uint32_t  aligned_tex    = ALIGN(tex_size, 32);
-	uint32_t  total_size     = aligned_header + aligned_tex * 2;
+	uint32_t  total_size     = aligned_header + aligned_tex * 2 + 32;
 	uintptr_t align_pos;
 
 	if (!init_shared_info(total_size)) {
@@ -705,6 +705,9 @@ bool capture_init_shmem(struct shmem_data **data, HWND window,
 	align_pos += aligned_header;
 	align_pos &= ~(32 - 1);
 	align_pos -= (uintptr_t)shmem_info;
+
+	if (align_pos < sizeof(struct shmem_data))
+		align_pos += 32;
 
 	(*data)->last_tex = -1;
 	(*data)->tex1_offset = (uint32_t)align_pos;
@@ -792,19 +795,15 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID unused1)
 			DbgOut("Failed to get current thread handle");
 
 		if (!init_signals()) {
-			hlog("graphics_hook failed init_signals");
 			return false;
 		}
 		if (!init_system_path()) {
-			hlog("graphics_hook failed init_system_path");
 			return false;
 		}
 		if (!init_hook_info()) {
-			hlog("graphics_hook failed init_hook_info");
 			return false;
 		}
 		if (!init_mutexes()) {
-			hlog("graphics_hook failed init_mutexes");
 			return false;
 		}
 
@@ -817,11 +816,9 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID unused1)
 				(LPTHREAD_START_ROUTINE)main_capture_thread,
 				(LPVOID)cur_thread, 0, 0);
 		if (!capture_thread) {
-			hlog("graphics_hook failed capture_thread");
 			CloseHandle(cur_thread);
 			return false;
 		}
-		hlog("graphics_hook SUCCESS");
 
 	} else if (reason == DLL_PROCESS_DETACH) {
 		if (capture_thread) {

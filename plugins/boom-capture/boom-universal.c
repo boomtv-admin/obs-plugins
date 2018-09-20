@@ -406,7 +406,7 @@ void bcu_set_default_postition(void *data)
 		GetClientRect(gc->window, &rect);
 		struct vec2 *pos = bzalloc(sizeof(struct vec2));
 		struct vec2 *scale = bzalloc(sizeof(struct vec2));
-		
+
 
 		/*pos->x = gc->ovi->base_width - width * item->scale.x;
 		pos->y = gc->ovi->base_height - height  * item->scale.y;*/
@@ -456,13 +456,13 @@ void bcu_set_scale(void *data)
 
 	struct bcu *gc = data;
 	struct obs_scene_item * item = bcu_get_scene_item(data);
-	
+
 
 	if (item)
 	{
 		struct vec2 *pos = bzalloc(sizeof(struct vec2));
 		struct vec2 *scale = bzalloc(sizeof(struct vec2));
-		
+
 		if (gc->last_rect.right > 0 && gc->last_rect.bottom > 0)
 		{
 			if (!gc->use2D)
@@ -526,7 +526,7 @@ void bcu_init(void *data)
 	if (bcu_assert("bcu_init", data) == false) return;
 
 	//MessageBox(NULL, (LPCWSTR)L"BoomApp is not running. Please start BoomApp before start playing game!", (LPCWSTR)L"Warning", MB_SYSTEMMODAL | MB_OK | MB_ICONWARNING);
-	
+
 	// Find BoomApp window
 	char* title = bzalloc(255 * sizeof(char));
 	strcpy(title, "Boom Replay");
@@ -639,8 +639,6 @@ static inline HANDLE open_process(DWORD desired_access, bool inherit_handle,
 // Stop capturing
 static void stop_capture(struct bcu *gc)
 {
-	if (bcu_assert("stop_capture", gc) == false) return;
-
 	ipc_pipe_server_free(&gc->pipe);
 
 	if (gc->hook_stop) {
@@ -673,8 +671,8 @@ static void stop_capture(struct bcu *gc)
 	close_handle(&gc->texture_mutexes[1]);
 
 	// Empty the texture buffer
-	memset(gc->texture_buffers[0], 0, gc->pitch * gc->cy);
-	memset(gc->texture_buffers[1], 0, gc->pitch * gc->cy);
+	// memset(gc->texture_buffers[0], 0, gc->pitch * gc->cy);
+	// memset(gc->texture_buffers[1], 0, gc->pitch * gc->cy);
 
 	if (gc->texture) {
 		obs_enter_graphics();
@@ -683,17 +681,21 @@ static void stop_capture(struct bcu *gc)
 		gc->texture = NULL;
 	}
 
+	if (gc->active)
+		info("capture stopped");
+
 	gc->copy_texture = NULL;
 	gc->wait_for_target_startup = false;
 	gc->active = false;
 	gc->capturing = false;
+
+	if (gc->retrying)
+		gc->retrying--;
 }
 
 
 static inline void free_config(struct bcu_config *config)
 {
-	if (bcu_assert("free_config", config) == false) return;
-
 	bfree(config->title_first);
 	bfree(config->title_second);
 	memset(config, 0, sizeof(*config));
@@ -702,7 +704,6 @@ static inline void free_config(struct bcu_config *config)
 
 static void bcu_destroy(void *data)
 {
-	if (bcu_assert("bcu_destroy", data) == false) return;
 	struct bcu *gc = data;
 
 	if (!gc->use2D)
@@ -724,13 +725,14 @@ static void bcu_destroy(void *data)
 	bfree(gc);
 }
 
+static inline bool using_older_non_mode_format(obs_data_t *settings)
+{
+	return obs_data_has_user_value(settings, SETTING_ANY_FULLSCREEN) &&
+		!obs_data_has_user_value(settings, SETTING_MODE);
+}
 
 static inline void get_config(struct bcu_config *cfg, obs_data_t *settings)
 {
-	if (bcu_assert("get_config", cfg) == false) return;
-	if (bcu_assert("get_config", settings) == false) return;
-
-
 	cfg->title_first = bzalloc(255 * sizeof(char));
 	cfg->title_second = bzalloc(255 * sizeof(char));
 	strcpy(cfg->title_first,	"ReplayView");
@@ -760,10 +762,6 @@ static inline int s_cmp(const char *str1, const char *str2)
 
 static inline bool capture_needs_reset(struct bcu_config *cfg1, struct bcu_config *cfg2)
 {
-	if (bcu_assert("capture_needs_reset", cfg1) == false) return false;
-	if (bcu_assert("capture_needs_reset", cfg2) == false) return false;
-
-
 	if ((s_cmp(cfg1->title_first, cfg2->title_first) != 0) || (s_cmp(cfg1->title_second, cfg2->title_second) != 0))
 	{
 		return true;
@@ -790,9 +788,6 @@ static void bcu_update(void *data, obs_data_t *settings)
 {
 	struct bcu *gc = data;
 	struct bcu_config cfg;
-
-	if (bcu_assert("bcu_update", data) == false) return;
-	if (bcu_assert("bcu_update", settings) == false) return;
 
 	// Update the border color & thickness
 	uint32_t color = (uint32_t)obs_data_get_int(settings, SETTING_BORDER_COLOR);
@@ -836,9 +831,6 @@ extern void wait_for_hook_initialization(void);
 // Module create
 static void *bcu_create(obs_data_t *settings, obs_source_t *source)
 {
-	if (bcu_assert("bcu_create", settings) == false) return NULL;
-	if (bcu_assert("bcu_create", source) == false) return NULL;
-
 	struct bcu *gc = bzalloc(sizeof(*gc));
 
 	wait_for_hook_initialization();
@@ -913,7 +905,7 @@ static bool check_file_integrity(struct bcu *gc, const char *file,
 	wchar_t *w_file = NULL;
 
 	if (!file || !*file) {
-		warn("BCU %s not found." STOP_BEING_BAD, name);
+		warn("Game capture %s not found." STOP_BEING_BAD, name);
 		return false;
 	}
 
@@ -923,7 +915,7 @@ static bool check_file_integrity(struct bcu *gc, const char *file,
 	}
 
 	handle = CreateFileW(w_file, GENERIC_READ | GENERIC_EXECUTE,
-		FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+			FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
 
 	bfree(w_file);
 
@@ -934,16 +926,14 @@ static bool check_file_integrity(struct bcu *gc, const char *file,
 
 	error = GetLastError();
 	if (error == ERROR_FILE_NOT_FOUND) {
-		warn("BCU file '%s' not found."
-			STOP_BEING_BAD, file);
-	}
-	else if (error == ERROR_ACCESS_DENIED) {
-		warn("BCU file '%s' could not be loaded."
-			STOP_BEING_BAD, file);
-	}
-	else {
-		warn("BCU file '%s' could not be loaded: %lu."
-			STOP_BEING_BAD, file, error);
+		warn("Game capture file '%s' not found."
+				STOP_BEING_BAD, file);
+	} else if (error == ERROR_ACCESS_DENIED) {
+		warn("Game capture file '%s' could not be loaded."
+				STOP_BEING_BAD, file);
+	} else {
+		warn("Game capture file '%s' could not be loaded: %lu."
+				STOP_BEING_BAD, file, error);
 	}
 
 	return false;
@@ -1029,17 +1019,14 @@ static inline bool init_texture_mutexes(struct bcu *gc)
 
 	if (!gc->texture_mutexes[0] || !gc->texture_mutexes[1]) {
 		DWORD error = GetLastError();
-
-		info("init_texture_mutexes failing: %i %i %i %s", gc->texture_mutexes[0], gc->texture_mutexes[1], error, GetLastErrorAsString());
 		if (error == 2) {
 			if (!gc->retrying) {
 				gc->retrying = 2;
 				info("hook not loaded yet, retrying..");
 			}
-		}
-		else {
+		} else {
 			warn("failed to open texture mutexes: %lu",
-				GetLastErrorAsString());
+					GetLastError());
 		}
 		return false;
 	}
@@ -1051,8 +1038,6 @@ static inline bool init_texture_mutexes(struct bcu *gc)
 /* if there's already a hook in the process, then signal and start */
 static inline bool attempt_existing_hook(struct bcu *gc)
 {
-	if (bcu_assert("attempt_existing_hook", gc) == false) return false;
-
 	gc->hook_restart = open_event_gc(gc, EVENT_CAPTURE_RESTART);
 	if (gc->hook_restart) {
 		debug("existing hook found, signaling process: %s",
@@ -1067,8 +1052,6 @@ static inline bool attempt_existing_hook(struct bcu *gc)
 
 static inline void reset_frame_interval(struct bcu *gc)
 {
-	if (bcu_assert("reset_frame_interval", gc) == false) return;
-
 	struct obs_video_info ovi;
 	uint64_t interval = 0;
 
@@ -1201,7 +1184,7 @@ static inline bool create_inject_process(struct bcu *gc,
 	wchar_t *command_line_w = malloc(4096 * sizeof(wchar_t));
 	wchar_t *inject_path_w;
 	wchar_t *hook_dll_w;
-	bool anti_cheat = false;
+	bool anti_cheat = use_anticheat(gc);
 	PROCESS_INFORMATION pi = { 0 };
 	STARTUPINFO si = { 0 };
 	bool success = false;
@@ -1457,7 +1440,7 @@ static void get_selected_window(struct bcu *gc)
 			gc->use2D = true;
 		}
 	}
-	else 
+	else
 	{
 		if (window = find_window(INCLUDE_MINIMIZED, WINDOW_PRIORITY_TITLE, "", gc->config.title_first, ""))
 		{
@@ -1472,12 +1455,12 @@ static void get_selected_window(struct bcu *gc)
 		}
 	}
 
-	if (window) 
+	if (window)
 	{
 		if (!gc->use2D) setup_window(gc, window);
 		info("Found ReplayView window! %i", gc->is_app);
 	}
-	else 
+	else
 	{
 		gc->wait_for_target_startup = true;
 		//gc->use2D = false;
@@ -1579,9 +1562,8 @@ static inline uint32_t convert_6_to_8bit(uint16_t val)
 	return (uint32_t)((double)(val & 0x3F) * (255.0 / 63.0));
 }
 
-
-static void copy_b5g6r5_tex(struct bcu *gc, int cur_texture,
-	uint8_t *data, uint32_t pitch)
+static void copy_b5g6r5_tex(struct game_capture *gc, int cur_texture,
+		uint8_t *data, uint32_t pitch)
 {
 	uint8_t *input = gc->texture_buffers[cur_texture];
 	uint32_t gc_cx = gc->cx;
@@ -1654,9 +1636,8 @@ static void copy_b5g6r5_tex(struct bcu *gc, int cur_texture,
 	}
 }
 
-
-static void copy_b5g5r5a1_tex(struct bcu *gc, int cur_texture,
-	uint8_t *data, uint32_t pitch)
+static void copy_b5g5r5a1_tex(struct game_capture *gc, int cur_texture,
+		uint8_t *data, uint32_t pitch)
 {
 	uint8_t *input = gc->texture_buffers[cur_texture];
 	uint32_t gc_cx = gc->cx;
@@ -1758,11 +1739,16 @@ static inline void copy_16bit_tex(struct bcu *gc, int cur_texture,
 
 static void copy_shmem_tex(struct bcu *gc)
 {
-	int cur_texture = gc->shmem_data->last_tex;
+	int cur_texture;
 	HANDLE mutex = NULL;
 	uint32_t pitch;
 	int next_texture;
 	uint8_t *data;
+
+	if (!gc->shmem_data)
+		return;
+
+	cur_texture = gc->shmem_data->last_tex;
 
 	if (cur_texture < 0 || cur_texture > 1)
 		return;
@@ -1772,13 +1758,11 @@ static void copy_shmem_tex(struct bcu *gc)
 	if (object_signalled(gc->texture_mutexes[cur_texture])) {
 		mutex = gc->texture_mutexes[cur_texture];
 
-	}
-	else if (object_signalled(gc->texture_mutexes[next_texture])) {
+	} else if (object_signalled(gc->texture_mutexes[next_texture])) {
 		mutex = gc->texture_mutexes[next_texture];
 		cur_texture = next_texture;
 
-	}
-	else {
+	} else {
 		return;
 	}
 
@@ -1786,12 +1770,10 @@ static void copy_shmem_tex(struct bcu *gc)
 		if (gc->convert_16bit) {
 			copy_16bit_tex(gc, cur_texture, data, pitch);
 
-		}
-		else if (pitch == gc->pitch) {
+		} else if (pitch == gc->pitch) {
 			memcpy(data, gc->texture_buffers[cur_texture],
-				pitch * gc->cy);
-		}
-		else {
+					pitch * gc->cy);
+		} else {
 			uint8_t *input = gc->texture_buffers[cur_texture];
 			uint32_t best_pitch =
 				pitch < gc->pitch ? pitch : gc->pitch;
@@ -1898,6 +1880,7 @@ static inline bool capture_valid(struct bcu *gc)
 
 	if (dstr_cmpi(&cur_class, gc->config.title_first) != 0)
 	{
+		info("Capture not valid any more: title not matching");
 		return false;
 	}
 
@@ -1943,8 +1926,6 @@ static void check_foreground_window(struct bcu *gc, float seconds)
 // Module item tick
 static void bcu_tick(void *data, float seconds)
 {
-	if (bcu_assert("bcu_tick", data) == false) return;
-
 	struct bcu *gc = data;
 	RECT rect;
 	bool reset_capture = false;
@@ -2106,14 +2087,11 @@ static void bcu_tick(void *data, float seconds)
 // Render cursor
 static inline void bcu_render_cursor(struct bcu *gc)
 {
-	POINT p = { 0 };
-
-	if (bcu_assert("bcu_render_cursor", gc) == false) return;
-
+	POINT p = {0};
 	HWND window;
 
 	if (!gc->global_hook_info->base_cx ||
-		!gc->global_hook_info->base_cy)
+	    !gc->global_hook_info->base_cy)
 		return;
 
 	window = !!gc->global_hook_info->window
@@ -2128,8 +2106,8 @@ static inline void bcu_render_cursor(struct bcu *gc)
 		(float)gc->global_hook_info->base_cy;
 
 	cursor_draw(&gc->cursor_data, -p.x, -p.y, x_scale, y_scale,
-		gc->global_hook_info->base_cx,
-		gc->global_hook_info->base_cy);
+			gc->global_hook_info->base_cx,
+			gc->global_hook_info->base_cy);
 }
 
 
@@ -2158,8 +2136,6 @@ void bcu_render_border(struct bcu *gc, float width, float height)
 // Module item render
 static void bcu_render(void *data, gs_effect_t *effect)
 {
-	if (bcu_assert("bcu_render", data) == false) return;
-
 	struct bcu *gc = data;
 
 	// Border
@@ -2191,7 +2167,7 @@ static void bcu_render(void *data, gs_effect_t *effect)
 				bcu_render_cursor(gc);
 			}
 		}
-		
+
 	}
 	else
 	{
@@ -2205,7 +2181,6 @@ static void bcu_render(void *data, gs_effect_t *effect)
 // Module item width
 static uint32_t bcu_width(void *data)
 {
-	if (bcu_assert("bcu_width", data) == false) return 0;
 	struct bcu *gc = data;
 
 	if (!gc->use2D)
@@ -2222,7 +2197,6 @@ static uint32_t bcu_width(void *data)
 // Module item height
 static uint32_t bcu_height(void *data)
 {
-	if (bcu_assert("bcu_height", data) == false) return 0;
 	struct bcu *gc = data;
 
 	if (!gc->use2D)
@@ -2249,8 +2223,6 @@ static const char *bcu_name(void *unused)
 // Module default settings
 static void bcu_defaults(obs_data_t *settings)
 {
-	if (bcu_assert("bcu_defaults", settings) == false) return;
-
 	obs_data_set_default_bool(settings, SETTING_COMPATIBILITY, false);
 	obs_data_set_default_bool(settings, SETTING_CURSOR, true);
 	obs_data_set_default_bool(settings, SETTING_TRANSPARENCY, false);
