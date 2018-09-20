@@ -166,6 +166,9 @@ gs_swap_chain::gs_swap_chain(gs_device *device, const gs_init_data *data)
 	if (FAILED(hr))
 		throw HRError("Failed to create swap chain", hr);
 
+	/* Ignore Alt+Enter */
+	device->factory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER);
+
 	Init();
 }
 
@@ -196,7 +199,9 @@ void gs_device::InitCompiler()
 		ver--;
 	}
 
-	throw "Could not find any D3DCompiler libraries";
+	throw "Could not find any D3DCompiler libraries. Make sure you've "
+		"installed the <a href=\"https://obsproject.com/go/dxwebsetup\">"
+		"DirectX components</a> that OBS Studio requires.";
 }
 
 void gs_device::InitFactory(uint32_t adapterIdx)
@@ -339,7 +344,10 @@ ID3D11BlendState *gs_device::AddBlendState()
 		bd.RenderTarget[i].DestBlendAlpha =
 			ConvertGSBlendType(blendState.destFactorA);
 		bd.RenderTarget[i].RenderTargetWriteMask =
-			D3D11_COLOR_WRITE_ENABLE_ALL;
+			(blendState.redEnabled   ? D3D11_COLOR_WRITE_ENABLE_RED   : 0) |
+			(blendState.greenEnabled ? D3D11_COLOR_WRITE_ENABLE_GREEN : 0) |
+			(blendState.blueEnabled  ? D3D11_COLOR_WRITE_ENABLE_BLUE  : 0) |
+			(blendState.alphaEnabled ? D3D11_COLOR_WRITE_ENABLE_ALPHA : 0) ;
 	}
 
 	SavedBlendState savedState(blendState, bd);
@@ -1029,7 +1037,6 @@ void device_load_vertexshader(gs_device_t *device, gs_shader_t *vertshader)
 		return;
 
 	gs_vertex_shader *vs = static_cast<gs_vertex_shader*>(vertshader);
-	gs_vertex_buffer *curVB = device->curVertexBuffer;
 
 	if (vertshader) {
 		if (vertshader->type != GS_SHADER_VERTEX) {
@@ -1038,9 +1045,6 @@ void device_load_vertexshader(gs_device_t *device, gs_shader_t *vertshader)
 			                "shader");
 			return;
 		}
-
-		if (curVB)
-			device_load_vertexbuffer(device, NULL);
 
 		shader    = vs->shader;
 		layout    = vs->layout;
@@ -1455,9 +1459,12 @@ void device_present(gs_device_t *device)
 	}
 }
 
+extern "C" void reset_duplicators(void);
+
 void device_flush(gs_device_t *device)
 {
 	device->context->Flush();
+	reset_duplicators();
 }
 
 void device_set_cull_mode(gs_device_t *device, enum gs_cull_mode mode)
@@ -1936,34 +1943,51 @@ void gs_vertexbuffer_destroy(gs_vertbuffer_t *vertbuffer)
 	delete vertbuffer;
 }
 
-void gs_vertexbuffer_flush(gs_vertbuffer_t *vertbuffer)
+static inline void gs_vertexbuffer_flush_internal(gs_vertbuffer_t *vertbuffer,
+		const gs_vb_data *data)
 {
+	size_t num_tex = data->num_tex < vertbuffer->uvBuffers.size()
+		? data->num_tex
+		: vertbuffer->uvBuffers.size();
+
 	if (!vertbuffer->dynamic) {
 		blog(LOG_ERROR, "gs_vertexbuffer_flush: vertex buffer is "
 		                "not dynamic");
 		return;
 	}
 
-	vertbuffer->FlushBuffer(vertbuffer->vertexBuffer,
-			vertbuffer->vbd.data->points, sizeof(vec3));
+	if (data->points)
+		vertbuffer->FlushBuffer(vertbuffer->vertexBuffer,
+				data->points, sizeof(vec3));
 
-	if (vertbuffer->normalBuffer)
+	if (vertbuffer->normalBuffer && data->normals)
 		vertbuffer->FlushBuffer(vertbuffer->normalBuffer,
-				vertbuffer->vbd.data->normals, sizeof(vec3));
+				data->normals, sizeof(vec3));
 
-	if (vertbuffer->tangentBuffer)
+	if (vertbuffer->tangentBuffer && data->tangents)
 		vertbuffer->FlushBuffer(vertbuffer->tangentBuffer,
-				vertbuffer->vbd.data->tangents, sizeof(vec3));
+				data->tangents, sizeof(vec3));
 
-	if (vertbuffer->colorBuffer)
+	if (vertbuffer->colorBuffer && data->colors)
 		vertbuffer->FlushBuffer(vertbuffer->colorBuffer,
-				vertbuffer->vbd.data->colors, sizeof(uint32_t));
+				data->colors, sizeof(uint32_t));
 
-	for (size_t i = 0; i < vertbuffer->uvBuffers.size(); i++) {
-		gs_tvertarray &tv = vertbuffer->vbd.data->tvarray[i];
+	for (size_t i = 0; i < num_tex; i++) {
+		gs_tvertarray &tv = data->tvarray[i];
 		vertbuffer->FlushBuffer(vertbuffer->uvBuffers[i],
 				tv.array, tv.width*sizeof(float));
 	}
+}
+
+void gs_vertexbuffer_flush(gs_vertbuffer_t *vertbuffer)
+{
+	gs_vertexbuffer_flush_internal(vertbuffer, vertbuffer->vbd.data);
+}
+
+void gs_vertexbuffer_flush_direct(gs_vertbuffer_t *vertbuffer,
+		const gs_vb_data *data)
+{
+	gs_vertexbuffer_flush_internal(vertbuffer, data);
 }
 
 struct gs_vb_data *gs_vertexbuffer_get_data(const gs_vertbuffer_t *vertbuffer)
@@ -1977,7 +2001,8 @@ void gs_indexbuffer_destroy(gs_indexbuffer_t *indexbuffer)
 	delete indexbuffer;
 }
 
-void gs_indexbuffer_flush(gs_indexbuffer_t *indexbuffer)
+static inline void gs_indexbuffer_flush_internal(gs_indexbuffer_t *indexbuffer,
+		const void *data)
 {
 	HRESULT hr;
 
@@ -1990,10 +2015,20 @@ void gs_indexbuffer_flush(gs_indexbuffer_t *indexbuffer)
 	if (FAILED(hr))
 		return;
 
-	memcpy(map.pData, indexbuffer->indices.data,
-			indexbuffer->num * indexbuffer->indexSize);
+	memcpy(map.pData, data, indexbuffer->num * indexbuffer->indexSize);
 
 	indexbuffer->device->context->Unmap(indexbuffer->indexBuffer, 0);
+}
+
+void gs_indexbuffer_flush(gs_indexbuffer_t *indexbuffer)
+{
+	gs_indexbuffer_flush_internal(indexbuffer, indexbuffer->indices.data);
+}
+
+void gs_indexbuffer_flush_direct(gs_indexbuffer_t *indexbuffer,
+		const void *data)
+{
+	gs_indexbuffer_flush_internal(indexbuffer, data);
 }
 
 void *gs_indexbuffer_get_data(const gs_indexbuffer_t *indexbuffer)

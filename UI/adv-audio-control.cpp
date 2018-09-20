@@ -13,7 +13,7 @@
 #define NSEC_PER_MSEC 1000000
 #endif
 
-OBSAdvAudioCtrl::OBSAdvAudioCtrl(QGridLayout *layout, obs_source_t *source_)
+OBSAdvAudioCtrl::OBSAdvAudioCtrl(QGridLayout *, obs_source_t *source_)
 	: source(source_)
 {
 	QHBoxLayout *hlayout;
@@ -32,7 +32,7 @@ OBSAdvAudioCtrl::OBSAdvAudioCtrl(QGridLayout *layout, obs_source_t *source_)
 	volume                         = new QSpinBox();
 	forceMono                      = new QCheckBox();
 	panning                        = new QSlider(Qt::Horizontal);
-#if defined(_WIN32) || defined(__APPLE__)
+#if defined(_WIN32) || defined(__APPLE__) || HAVE_PULSEAUDIO
 	monitoringType                 = new QComboBox();
 #endif
 	syncOffset                     = new QSpinBox();
@@ -93,7 +93,7 @@ OBSAdvAudioCtrl::OBSAdvAudioCtrl(QGridLayout *layout, obs_source_t *source_)
 	syncOffset->setValue(int(cur_sync / NSEC_PER_MSEC));
 
 	int idx;
-#if defined(_WIN32) || defined(__APPLE__)
+#if defined(_WIN32) || defined(__APPLE__) || HAVE_PULSEAUDIO
 	monitoringType->addItem(QTStr("Basic.AdvAudio.Monitoring.None"),
 			(int)OBS_MONITORING_TYPE_NONE);
 	monitoringType->addItem(QTStr("Basic.AdvAudio.Monitoring.MonitorOnly"),
@@ -138,7 +138,7 @@ OBSAdvAudioCtrl::OBSAdvAudioCtrl(QGridLayout *layout, obs_source_t *source_)
 			this, SLOT(panningChanged(int)));
 	QWidget::connect(syncOffset, SIGNAL(valueChanged(int)),
 			this, SLOT(syncOffsetChanged(int)));
-#if defined(_WIN32) || defined(__APPLE__)
+#if defined(_WIN32) || defined(__APPLE__) || HAVE_PULSEAUDIO
 	QWidget::connect(monitoringType, SIGNAL(currentIndexChanged(int)),
 			this, SLOT(monitoringTypeChanged(int)));
 #endif
@@ -155,20 +155,7 @@ OBSAdvAudioCtrl::OBSAdvAudioCtrl(QGridLayout *layout, obs_source_t *source_)
 	QWidget::connect(mixer6, SIGNAL(clicked(bool)),
 			this, SLOT(mixer6Changed(bool)));
 
-	int lastRow = layout->rowCount();
-
-	idx = 0;
-	layout->addWidget(nameLabel, lastRow, idx++);
-	layout->addWidget(volume, lastRow, idx++);
-	layout->addWidget(forceMonoContainer, lastRow, idx++);
-	layout->addWidget(panningContainer, lastRow, idx++);
-	layout->addWidget(syncOffset, lastRow, idx++);
-#if defined(_WIN32) || defined(__APPLE__)
-	layout->addWidget(monitoringType, lastRow, idx++);
-#endif
-	layout->addWidget(mixerContainer, lastRow, idx++);
-	layout->layout()->setAlignment(mixerContainer,
-			Qt::AlignHCenter | Qt::AlignVCenter);
+	setObjectName(sourceName);
 }
 
 OBSAdvAudioCtrl::~OBSAdvAudioCtrl()
@@ -178,10 +165,28 @@ OBSAdvAudioCtrl::~OBSAdvAudioCtrl()
 	forceMonoContainer->deleteLater();
 	panningContainer->deleteLater();
 	syncOffset->deleteLater();
-#if defined(_WIN32) || defined(__APPLE__)
+#if defined(_WIN32) || defined(__APPLE__) || HAVE_PULSEAUDIO
 	monitoringType->deleteLater();
 #endif
 	mixerContainer->deleteLater();
+}
+
+void OBSAdvAudioCtrl::ShowAudioControl(QGridLayout *layout)
+{
+	int lastRow = layout->rowCount();
+	int idx = 0;
+
+	layout->addWidget(nameLabel, lastRow, idx++);
+	layout->addWidget(volume, lastRow, idx++);
+	layout->addWidget(forceMonoContainer, lastRow, idx++);
+	layout->addWidget(panningContainer, lastRow, idx++);
+	layout->addWidget(syncOffset, lastRow, idx++);
+#if defined(_WIN32) || defined(__APPLE__) || HAVE_PULSEAUDIO
+	layout->addWidget(monitoringType, lastRow, idx++);
+#endif
+	layout->addWidget(mixerContainer, lastRow, idx++);
+	layout->layout()->setAlignment(mixerContainer,
+		Qt::AlignHCenter | Qt::AlignVCenter);
 }
 
 /* ------------------------------------------------------------------------- */

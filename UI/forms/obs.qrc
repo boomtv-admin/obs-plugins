@@ -2,6 +2,7 @@
   <qresource prefix="/res">
     <file>images/mute.png</file>
     <file>images/unmute.png</file>
+    <file>images/refresh.png</file>
     <file>images/configuration21_16.png</file>
     <file>images/invisible_mask.png</file>
     <file>images/visible_mask.png</file>
@@ -14,6 +15,10 @@
     <file>images/up.png</file>
     <file>images/obs.png</file>
     <file>images/tray_active.png</file>
+    <file>images/locked_mask.png</file>
+    <file>images/unlocked_mask.png</file>
+    <file>images/collapse.png</file>
+    <file>images/expand.png</file>
   </qresource>
   <qresource prefix="/settings">
     <file>images/settings/advanced.png</file>

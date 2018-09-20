@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 2.8.12)
 
+if (UNIX AND POLICY CMP0072)
+	# In case of both legacy and glvnd OpenGL libraries found. Prefer GLVND
+	cmake_policy(SET CMP0072 NEW)
+endif()
+
 project(obs-studio)
 
 option(BUILD_CAPTIONS "Build captions" FALSE)
@@ -20,10 +25,29 @@ if(WIN32)
 endif()
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules/")
+set(ENABLE_SCRIPTING TRUE CACHE BOOL "Enables scripting")
+set(SCRIPTING_ENABLED OFF CACHE BOOL "Interal global cmake variable" FORCE)
 
 include(ObsHelpers)
 include(ObsCpack)
 include(GNUInstallDirs)
+
+# Must be a string in the format of "x.x.x-rcx"
+if(DEFINED RELEASE_CANDIDATE)
+	set(OBS_VERSION "${RELEASE_CANDIDATE}")
+	string(REPLACE "-rc" "." RC_SPLIT ${RELEASE_CANDIDATE})
+	string(REPLACE "." ";" RC_SPLIT ${RC_SPLIT})
+	message(WARNING "******************************************************************************\nRelease candidate deteced, OBS_VERSION is now: ${OBS_VERSION}\n******************************************************************************")
+	list(GET RC_SPLIT 0 OBS_RELEASE_CANDIDATE_MAJOR)
+	list(GET RC_SPLIT 1 OBS_RELEASE_CANDIDATE_MINOR)
+	list(GET RC_SPLIT 2 OBS_RELEASE_CANDIDATE_PATCH)
+	list(GET RC_SPLIT 3 OBS_RELEASE_CANDIDATE)
+else()
+	set(OBS_RELEASE_CANDIDATE_MAJOR 0)
+	set(OBS_RELEASE_CANDIDATE_MINOR 0)
+	set(OBS_RELEASE_CANDIDATE_PATCH 0)
+	set(OBS_RELEASE_CANDIDATE 0)
+endif()
 
 if(MSVC AND NOT EXISTS "${CMAKE_BINARY_DIR}/ALL_BUILD.vcxproj.user")
 	file(GENERATE
@@ -58,11 +82,11 @@ elseif(MSVC)
 	endif()
 
 	# Disable pointless constant condition warnings
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4127 /wd4201")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4127 /wd4201 /wd4456 /wd4457 /wd4458 /wd4459 /wd4595")
 endif()
 
 if(WIN32)
-	add_definitions(-DUNICODE -D_UNICODE -D_CRT_SECURE_NO_WARNINGS)
+	add_definitions(-DUNICODE -D_UNICODE -D_CRT_SECURE_NO_WARNINGS -D_CRT_NONSTDC_NO_WARNINGS)
 endif()
 
 if(MSVC)
@@ -103,8 +127,14 @@ option(BUILD_TESTS "Build test directory (includes test sources and possibly a p
 mark_as_advanced(BUILD_TESTS)
 
 if(NOT INSTALLER_RUN)
-	add_subdirectory(deps)
+	option(ENABLE_UI "Enables the OBS user interfaces" ON)
+	if(DISABLE_UI OR NOT ENABLE_UI)
+		set(UI_ENABLED FALSE)
+	else()
+		set(UI_ENABLED TRUE)
+	endif()
 
+	add_subdirectory(deps)
 
 	if(WIN32)
 		add_subdirectory(libobs-d3d11)

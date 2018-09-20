@@ -377,8 +377,6 @@ void load_text_from_file(struct ft2_source *srcdata, const char *filename)
 		srcdata->text = bzalloc(filesize);
 		bytes_read = fread(srcdata->text, filesize - 2, 1, tmp_file);
 
-		srcdata->m_timestamp =
-			get_modified_timestamp(srcdata->text_file);
 		bfree(tmp_read);
 		fclose(tmp_file);
 
@@ -386,7 +384,6 @@ void load_text_from_file(struct ft2_source *srcdata, const char *filename)
 	}
 
 	fseek(tmp_file, 0, SEEK_SET);
-	srcdata->m_timestamp = get_modified_timestamp(srcdata->text_file);
 
 	tmp_read = bzalloc(filesize + 1);
 	bytes_read = fread(tmp_read, filesize, 1, tmp_file);
@@ -407,7 +404,7 @@ void load_text_from_file(struct ft2_source *srcdata, const char *filename)
 void read_from_end(struct ft2_source *srcdata, const char *filename)
 {
 	FILE *tmp_file = NULL;
-	uint32_t filesize = 0, cur_pos = 0;
+	uint32_t filesize = 0, cur_pos = 0, log_lines = 0;
 	char *tmp_read = NULL;
 	uint16_t value = 0, line_breaks = 0;
 	size_t bytes_read;
@@ -431,8 +428,9 @@ void read_from_end(struct ft2_source *srcdata, const char *filename)
 	fseek(tmp_file, 0, SEEK_END);
 	filesize = (uint32_t)ftell(tmp_file);
 	cur_pos = filesize;
+	log_lines = srcdata->log_lines;
 
-	while (line_breaks <= 6 && cur_pos != 0) {
+	while (line_breaks <= log_lines && cur_pos != 0) {
 		if (!utf16) cur_pos--;
 		else cur_pos -= 2;
 		fseek(tmp_file, cur_pos, SEEK_SET);
@@ -464,8 +462,6 @@ void read_from_end(struct ft2_source *srcdata, const char *filename)
 				tmp_file);
 
 		remove_cr(srcdata->text);
-		srcdata->m_timestamp =
-			get_modified_timestamp(srcdata->text_file);
 		bfree(tmp_read);
 		fclose(tmp_file);
 
@@ -485,7 +481,6 @@ void read_from_end(struct ft2_source *srcdata, const char *filename)
 		srcdata->text, (strlen(tmp_read) + 1));
 
 	remove_cr(srcdata->text);
-	srcdata->m_timestamp = get_modified_timestamp(srcdata->text_file);
 	bfree(tmp_read);
 }
 

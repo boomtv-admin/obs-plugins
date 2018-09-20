@@ -49,7 +49,7 @@
 #define TEXT_MODE                obs_module_text("Mode")
 #define TEXT_GAME_CAPTURE        obs_module_text("GameCapture")
 #define TEXT_ANY_FULLSCREEN      obs_module_text("GameCapture.AnyFullscreen")
-#define TEXT_SLI_COMPATIBILITY   obs_module_text("Compatibility")
+#define TEXT_SLI_COMPATIBILITY   obs_module_text("SLIFix")
 #define TEXT_ALLOW_TRANSPARENCY  obs_module_text("AllowTransparency")
 #define TEXT_FORCE_SCALING       obs_module_text("GameCapture.ForceScaling")
 #define TEXT_SCALE_RES           obs_module_text("GameCapture.ScaleRes")
@@ -456,7 +456,7 @@ static bool hotkey_start(void *data, obs_hotkey_pair_id id,
 	if (pressed && gc->config.mode == CAPTURE_MODE_HOTKEY) {
 		info("Activate hotkey pressed");
 		os_atomic_set_long(&gc->hotkey_window,
-				(long)GetForegroundWindow());
+				(long)(uintptr_t)GetForegroundWindow());
 		os_atomic_set_bool(&gc->deactivate_hook, true);
 		os_atomic_set_bool(&gc->activate_hook_now, true);
 	}
@@ -622,7 +622,7 @@ static inline bool is_64bit_process(HANDLE process)
 static inline bool open_target_process(struct game_capture *gc)
 {
 	gc->target_process = open_process(
-			PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
+			PROCESS_QUERY_INFORMATION | SYNCHRONIZE,
 			false, gc->process_id);
 	if (!gc->target_process) {
 		warn("could not open process: %s", gc->config.executable);
@@ -723,6 +723,11 @@ static inline bool init_hook_info(struct game_capture *gc)
 		warn("init_hook_info: failed to map data view: %lu",
 				GetLastError());
 		return false;
+	}
+
+	if (gc->config.force_shmem) {
+		warn("init_hook_info: user is forcing shared memory "
+			"(compatibility mode)");
 	}
 
 	gc->global_hook_info->offsets = gc->process_is_64bit ?
@@ -1424,11 +1429,16 @@ static inline void copy_16bit_tex(struct game_capture *gc, int cur_texture,
 
 static void copy_shmem_tex(struct game_capture *gc)
 {
-	int cur_texture = gc->shmem_data->last_tex;
+	int cur_texture;
 	HANDLE mutex = NULL;
 	uint32_t pitch;
 	int next_texture;
 	uint8_t *data;
+
+	if (!gc->shmem_data)
+		return;
+
+	cur_texture = gc->shmem_data->last_tex;
 
 	if (cur_texture < 0 || cur_texture > 1)
 		return;
@@ -1545,7 +1555,7 @@ static inline bool capture_valid(struct game_capture *gc)
 {
 	if (!gc->dwm_capture && !IsWindow(gc->window))
 	       return false;
-	
+
 	return !object_signalled(gc->target_process);
 }
 
@@ -1572,7 +1582,8 @@ static void game_capture_tick(void *data, float seconds)
 	bool activate_now = os_atomic_set_bool(&gc->activate_hook_now, false);
 
 	if (activate_now) {
-		HWND hwnd = (HWND)os_atomic_load_long(&gc->hotkey_window);
+		HWND hwnd = (HWND)(uintptr_t)os_atomic_load_long(
+				&gc->hotkey_window);
 
 		if (is_uwp_window(hwnd))
 			hwnd = get_uwp_actual_window(hwnd);
@@ -1746,13 +1757,13 @@ static void game_capture_render(void *data, gs_effect_t *effect)
 static uint32_t game_capture_width(void *data)
 {
 	struct game_capture *gc = data;
-	return gc->active ? gc->global_hook_info->cx : 0;
+	return gc->active ? gc->cx : 0;
 }
 
 static uint32_t game_capture_height(void *data)
 {
 	struct game_capture *gc = data;
-	return gc->active ? gc->global_hook_info->cy : 0;
+	return gc->active ? gc->cy : 0;
 }
 
 static const char *game_capture_name(void *unused)

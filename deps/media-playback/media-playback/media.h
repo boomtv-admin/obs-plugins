@@ -53,6 +53,8 @@ struct mp_media {
 
 	char *path;
 	char *format_name;
+	int buffering;
+	int speed;
 
 	enum AVPixelFormat scale_format;
 	struct SwsContext *swscale;
@@ -61,7 +63,7 @@ struct mp_media {
 
 	struct mp_decode v;
 	struct mp_decode a;
-	bool is_network;
+	bool is_local_file;
 	bool has_video;
 	bool has_audio;
 	bool is_file;
@@ -79,6 +81,8 @@ struct mp_media {
 	int64_t start_ts;
 	int64_t base_ts;
 
+	uint64_t interrupt_poll_ts;
+
 	pthread_mutex_t mutex;
 	os_sem_t *sem;
 	bool stopping;
@@ -93,16 +97,24 @@ struct mp_media {
 
 typedef struct mp_media mp_media_t;
 
-extern bool mp_media_init(mp_media_t *media,
-		const char *path,
-		const char *format,
-		void *opaque,
-		mp_video_cb v_cb,
-		mp_audio_cb a_cb,
-		mp_stop_cb stop_cb,
-		mp_video_cb v_preload_cb,
-		bool hardware_decoding,
-		enum video_range_type force_range);
+struct mp_media_info {
+	void *opaque;
+
+	mp_video_cb v_cb;
+	mp_video_cb v_preload_cb;
+	mp_audio_cb a_cb;
+	mp_stop_cb stop_cb;
+
+	const char *path;
+	const char *format;
+	int buffering;
+	int speed;
+	enum video_range_type force_range;
+	bool hardware_decoding;
+	bool is_local_file;
+};
+
+extern bool mp_media_init(mp_media_t *media, const struct mp_media_info *info);
 extern void mp_media_free(mp_media_t *media);
 
 extern void mp_media_play(mp_media_t *media, bool loop);

@@ -32,15 +32,21 @@ struct obs_scene_item {
 	volatile long         ref;
 	volatile bool         removed;
 
+	bool                  is_group;
+	bool                  update_transform;
+	bool                  update_group_resize;
+
 	int64_t               id;
 
 	struct obs_scene      *parent;
 	struct obs_source     *source;
 	volatile long         active_refs;
 	volatile long         defer_update;
+	volatile long         defer_group_resize;
 	bool                  user_visible;
 	bool                  visible;
 	bool                  selected;
+	bool                  locked;
 
 	gs_texrender_t        *item_render;
 	struct obs_sceneitem_crop crop;
@@ -67,6 +73,8 @@ struct obs_scene_item {
 
 	obs_hotkey_pair_id    toggle_visibility;
 
+	obs_data_t            *private_settings;
+
 	pthread_mutex_t       actions_mutex;
 	DARRAY(struct item_action) audio_actions;
 
@@ -77,6 +85,11 @@ struct obs_scene_item {
 
 struct obs_scene {
 	struct obs_source     *source;
+
+	bool                  is_group;
+	bool                  custom_size;
+	uint32_t              cx;
+	uint32_t              cy;
 
 	int64_t               id_counter;
 

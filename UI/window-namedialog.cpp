@@ -16,6 +16,7 @@
 ******************************************************************************/
 
 #include "window-namedialog.hpp"
+#include "qt-wrappers.hpp"
 #include "ui_NameDialog.h"
 #include "obs-app.hpp"
 
@@ -36,17 +37,22 @@ static bool IsWhitespace(char ch)
 }
 
 bool NameDialog::AskForName(QWidget *parent, const QString &title,
-		const QString &text, string &str, const QString &placeHolder)
+		const QString &text, string &str, const QString &placeHolder,
+		int maxSize)
 {
+	if (maxSize <= 0 || maxSize > 32767)
+		maxSize = 256;
+
 	NameDialog dialog(parent);
 	dialog.setWindowTitle(title);
 	dialog.ui->label->setText(text);
+	dialog.ui->userText->setMaxLength(maxSize);
 	dialog.ui->userText->setText(placeHolder);
 	dialog.ui->userText->selectAll();
 
 	bool accepted = (dialog.exec() == DialogCode::Accepted);
 	if (accepted) {
-		str = dialog.ui->userText->text().toStdString();
+		str = QT_TO_UTF8(dialog.ui->userText->text());
 
 		while (str.size() && IsWhitespace(str.back()))
 			str.erase(str.end() - 1);

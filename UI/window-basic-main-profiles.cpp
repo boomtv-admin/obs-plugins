@@ -144,16 +144,16 @@ static bool CopyProfile(const char *fromPartial, const char *to)
 {
 	os_glob_t *glob;
 	char path[512];
+	char dir[512];
 	int ret;
 
-	ret = GetConfigPath(path, sizeof(path), "obs-studio/basic/profiles/");
+	ret = GetConfigPath(dir, sizeof(dir), "obs-studio/basic/profiles/");
 	if (ret <= 0) {
 		blog(LOG_WARNING, "Failed to get profiles config path");
 		return false;
 	}
 
-	strcat(path, fromPartial);
-	strcat(path, "/*");
+	snprintf(path, sizeof(path), "%s%s/*", dir, fromPartial);
 
 	if (os_glob(path, 0, &glob) != 0) {
 		blog(LOG_WARNING, "Failed to glob profile '%s'", fromPartial);
@@ -186,6 +186,7 @@ bool OBSBasic::AddProfile(bool create_new, const char *title, const char *text,
 {
 	std::string newName;
 	std::string newDir;
+	std::string newPath;
 	ConfigFile config;
 
 	if (!GetProfileName(this, newName, newDir, title, text, init_text))
@@ -194,27 +195,29 @@ bool OBSBasic::AddProfile(bool create_new, const char *title, const char *text,
 	std::string curDir = config_get_string(App()->GlobalConfig(),
 			"Basic", "ProfileDir");
 
-	char newPath[512];
-	int ret = GetConfigPath(newPath, 512, "obs-studio/basic/profiles/");
+	char baseDir[512];
+	int ret = GetConfigPath(baseDir, sizeof(baseDir),
+			"obs-studio/basic/profiles/");
 	if (ret <= 0) {
 		blog(LOG_WARNING, "Failed to get profiles config path");
 		return false;
 	}
 
-	strcat(newPath, newDir.c_str());
+	newPath = baseDir;
+	newPath += newDir;
 
-	if (os_mkdir(newPath) < 0) {
+	if (os_mkdir(newPath.c_str()) < 0) {
 		blog(LOG_WARNING, "Failed to create profile directory '%s'",
 				newDir.c_str());
 		return false;
 	}
 
 	if (!create_new)
-		CopyProfile(curDir.c_str(), newPath);
+		CopyProfile(curDir.c_str(), newPath.c_str());
 
-	strcat(newPath, "/basic.ini");
+	newPath += "/basic.ini";
 
-	if (config.Open(newPath, CONFIG_OPEN_ALWAYS) != 0) {
+	if (config.Open(newPath.c_str(), CONFIG_OPEN_ALWAYS) != 0) {
 		blog(LOG_ERROR, "Failed to open new config file '%s'",
 				newDir.c_str());
 		return false;
@@ -343,6 +346,19 @@ void OBSBasic::ResetProfileData()
 	ResetOutputs();
 	ClearHotkeys();
 	CreateHotkeys();
+
+	/* load audio monitoring */
+#if defined(_WIN32) || defined(__APPLE__) || HAVE_PULSEAUDIO
+	const char *device_name = config_get_string(basicConfig, "Audio",
+			"MonitoringDeviceName");
+	const char *device_id = config_get_string(basicConfig, "Audio",
+			"MonitoringDeviceId");
+
+	obs_set_audio_monitoring_device(device_name, device_id);
+
+	blog(LOG_INFO, "Audio monitoring device:\n\tname: %s\n\tid: %s",
+			device_name, device_id);
+#endif
 }
 
 void OBSBasic::on_actionNewProfile_triggered()
@@ -524,15 +540,28 @@ void OBSBasic::on_actionExportProfile_triggered()
 
 		if (!folder.exists()) {
 			folder.mkpath(outputDir);
-			QFile::copy(inputPath + currentProfile + "/basic.ini",
-					outputDir + "/basic.ini");
-			QFile::copy(inputPath + currentProfile + "/service.json",
-					outputDir + "/service.json");
-			QFile::copy(inputPath + currentProfile + "/streamEncoder.json",
-					outputDir + "/streamEncoder.json");
-			QFile::copy(inputPath + currentProfile + "/recordEncoder.json",
-					outputDir + "/recordEncoder.json");
+		} else {
+			if (QFile::exists(outputDir + "/basic.ini"))
+				QFile::remove(outputDir + "/basic.ini");
+
+			if (QFile::exists(outputDir + "/service.json"))
+				QFile::remove(outputDir + "/service.json");
+
+			if (QFile::exists(outputDir + "/streamEncoder.json"))
+				QFile::remove(outputDir + "/streamEncoder.json");
+
+			if (QFile::exists(outputDir + "/recordEncoder.json"))
+				QFile::remove(outputDir + "/recordEncoder.json");
 		}
+
+		QFile::copy(inputPath + currentProfile + "/basic.ini",
+				outputDir + "/basic.ini");
+		QFile::copy(inputPath + currentProfile + "/service.json",
+				outputDir + "/service.json");
+		QFile::copy(inputPath + currentProfile + "/streamEncoder.json",
+				outputDir + "/streamEncoder.json");
+		QFile::copy(inputPath + currentProfile + "/recordEncoder.json",
+				outputDir + "/recordEncoder.json");
 	}
 }
 
@@ -581,10 +610,71 @@ void OBSBasic::ChangeProfile()
 	config_save_safe(App()->GlobalConfig(), "tmp", nullptr);
 	UpdateTitleBar();
 
+	CheckForSimpleModeX264Fallback();
+
 	blog(LOG_INFO, "Switched to profile '%s' (%s)",
 			newName, newDir);
 	blog(LOG_INFO, "------------------------------------------------");
 
 	if (api)
 		api->on_event(OBS_FRONTEND_EVENT_PROFILE_CHANGED);
+}
+
+void OBSBasic::CheckForSimpleModeX264Fallback()
+{
+	const char *curStreamEncoder = config_get_string(basicConfig,
+			"SimpleOutput", "StreamEncoder");
+	const char *curRecEncoder = config_get_string(basicConfig,
+			"SimpleOutput", "RecEncoder");
+	bool qsv_supported = false;
+	bool amd_supported = false;
+	bool nve_supported = false;
+	bool changed = false;
+	size_t idx = 0;
+	const char *id;
+
+	while (obs_enum_encoder_types(idx++, &id)) {
+		if (strcmp(id, "amd_amf_h264") == 0)
+			amd_supported = true;
+		else if (strcmp(id, "obs_qsv11") == 0)
+			qsv_supported = true;
+		else if (strcmp(id, "ffmpeg_nvenc") == 0)
+			nve_supported = true;
+	}
+
+	auto CheckEncoder = [&] (const char *&name)
+	{
+		if (strcmp(name, SIMPLE_ENCODER_QSV) == 0) {
+			if (!qsv_supported) {
+				changed = true;
+				name = SIMPLE_ENCODER_X264;
+				return false;
+			}
+		} else if (strcmp(name, SIMPLE_ENCODER_NVENC) == 0) {
+			if (!nve_supported) {
+				changed = true;
+				name = SIMPLE_ENCODER_X264;
+				return false;
+			}
+		} else if (strcmp(name, SIMPLE_ENCODER_AMD) == 0) {
+			if (!amd_supported) {
+				changed = true;
+				name = SIMPLE_ENCODER_X264;
+				return false;
+			}
+		}
+
+		return true;
+	};
+
+	if (!CheckEncoder(curStreamEncoder))
+		config_set_string(basicConfig,
+				"SimpleOutput", "StreamEncoder",
+				curStreamEncoder);
+	if (!CheckEncoder(curRecEncoder))
+		config_set_string(basicConfig,
+				"SimpleOutput", "RecEncoder",
+				curRecEncoder);
+	if (changed)
+		config_save_safe(basicConfig, "tmp", nullptr);
 }

@@ -49,9 +49,15 @@ OBSBasicProperties::OBSBasicProperties(QWidget *parent, OBSSource source_)
 	int cy = (int)config_get_int(App()->GlobalConfig(), "PropertiesWindow",
 			"cy");
 
-	buttonBox->setStandardButtons(QDialogButtonBox::Ok |
-			QDialogButtonBox::Cancel);
 	buttonBox->setObjectName(QStringLiteral("buttonBox"));
+	buttonBox->setStandardButtons(QDialogButtonBox::Ok |
+	                              QDialogButtonBox::Cancel |
+	                              QDialogButtonBox::RestoreDefaults);
+
+	buttonBox->button(QDialogButtonBox::Ok)->setText(QTStr("OK"));
+	buttonBox->button(QDialogButtonBox::Cancel)->setText(QTStr("Cancel"));
+	buttonBox->button(QDialogButtonBox::RestoreDefaults)->
+		setText(QTStr("Defaults"));
 
 	if (cx > 400 && cy > 400)
 		resize(cx, cy);
@@ -88,7 +94,7 @@ OBSBasicProperties::OBSBasicProperties(QWidget *parent, OBSSource source_)
 	setLayout(new QVBoxLayout(this));
 	layout()->addWidget(windowSplitter);
 	layout()->addWidget(buttonBox);
-	layout()->setAlignment(buttonBox, Qt::AlignRight | Qt::AlignBottom);
+	layout()->setAlignment(buttonBox, Qt::AlignBottom);
 
 	view->show();
 	installEventFilter(CreateShortcutFilter());
@@ -108,15 +114,19 @@ OBSBasicProperties::OBSBasicProperties(QWidget *parent, OBSSource source_)
 		obs_display_add_draw_callback(preview->GetDisplay(),
 				OBSBasicProperties::DrawPreview, this);
 	};
-
 	enum obs_source_type type = obs_source_get_type(source);
 	uint32_t caps = obs_source_get_output_flags(source);
 	bool drawable_type = type == OBS_SOURCE_TYPE_INPUT ||
 		type == OBS_SOURCE_TYPE_SCENE;
+	bool drawable_preview = (caps & OBS_SOURCE_VIDEO) != 0;
 
-	if (drawable_type && (caps & OBS_SOURCE_VIDEO) != 0)
+	if (drawable_preview && drawable_type) {
+		preview->show();
 		connect(preview.data(), &OBSQTDisplay::DisplayCreated,
 				addDrawCallback);
+	} else {
+		preview->hide();
+	}
 }
 
 OBSBasicProperties::~OBSBasicProperties()
@@ -158,9 +168,8 @@ void OBSBasicProperties::on_buttonBox_clicked(QAbstractButton *button)
 
 		if (view->DeferUpdate())
 			view->UpdateSettings();
-	}
 
-	if (val == QDialogButtonBox::RejectRole) {
+	} else if (val == QDialogButtonBox::RejectRole) {
 		obs_data_t *settings = obs_source_get_settings(source);
 		obs_data_clear(settings);
 		obs_data_release(settings);
@@ -171,6 +180,16 @@ void OBSBasicProperties::on_buttonBox_clicked(QAbstractButton *button)
 			obs_source_update(source, oldSettings);
 
 		close();
+
+	} else if (val == QDialogButtonBox::ResetRole) {
+		obs_data_t *settings = obs_source_get_settings(source);
+		obs_data_clear(settings);
+		obs_data_release(settings);
+
+		if (!view->DeferUpdate())
+			obs_source_update(source, nullptr);
+
+		view->RefreshProperties();
 	}
 }
 
@@ -273,6 +292,7 @@ bool OBSBasicProperties::ConfirmQuit()
 
 	switch (button) {
 	case QMessageBox::Save:
+		acceptClicked = true;
 		if (view->DeferUpdate())
 			view->UpdateSettings();
 		// Do nothing because the settings are already updated

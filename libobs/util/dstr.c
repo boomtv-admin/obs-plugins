@@ -197,6 +197,11 @@ wchar_t *wstrstri(const wchar_t *str, const wchar_t *find)
 	return NULL;
 }
 
+static inline bool is_padding(char ch)
+{
+	return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r';
+}
+
 char *strdepad(char *str)
 {
 	char *temp;
@@ -210,7 +215,7 @@ char *strdepad(char *str)
 	temp = str;
 
 	/* remove preceding spaces/tabs */
-	while (*temp == ' ' || *temp == '\t')
+	while (is_padding(*temp))
 		++temp;
 
 	len = strlen(str);
@@ -219,7 +224,7 @@ char *strdepad(char *str)
 
 	if (len) {
 		temp = str + (len-1);
-		while (*temp == ' ' || *temp == '\t')
+		while (is_padding(*temp))
 			*(temp--) = 0;
 	}
 
@@ -257,49 +262,78 @@ wchar_t *wcsdepad(wchar_t *str)
 
 char **strlist_split(const char *str, char split_ch, bool include_empty)
 {
-	const char    *cur_str = str;
-	const char    *next_str;
-	const char    *new_str;
-	DARRAY(char*) list;
-
-	da_init(list);
+	const char *cur_str = str;
+	const char *next_str;
+	char *      out = NULL;
+	size_t      count = 0;
+	size_t      total_size = 0;
 
 	if (str) {
+		char **table;
+		char *offset;
+		size_t cur_idx = 0;
+		size_t cur_pos = 0;
+
 		next_str = strchr(str, split_ch);
 
 		while (next_str) {
 			size_t size = next_str - cur_str;
 
 			if (size || include_empty) {
-				new_str = bstrdup_n(cur_str, size);
-				da_push_back(list, &new_str);
+				++count;
+				total_size += size + 1;
 			}
 
-			cur_str = next_str+1;
+			cur_str = next_str + 1;
 			next_str = strchr(cur_str, split_ch);
 		}
 
 		if (*cur_str || include_empty) {
-			new_str = bstrdup(cur_str);
-			da_push_back(list, &new_str);
+			++count;
+			total_size += strlen(cur_str) + 1;
 		}
+
+		/* ------------------ */
+
+		cur_pos    = (count + 1) * sizeof(char *);
+		total_size += cur_pos;
+		out        = bmalloc(total_size);
+		offset     = out + cur_pos;
+		table      = (char **)out;
+
+		/* ------------------ */
+
+		next_str = strchr(str, split_ch);
+		cur_str  = str;
+
+		while (next_str) {
+			size_t size = next_str - cur_str;
+
+			if (size || include_empty) {
+				table[cur_idx++] = offset;
+				strncpy(offset, cur_str, size);
+				offset[size] = 0;
+				offset += size + 1;
+			}
+
+			cur_str = next_str + 1;
+			next_str = strchr(cur_str, split_ch);
+		}
+
+		if (*cur_str || include_empty) {
+			table[cur_idx++] = offset;
+			strcpy(offset, cur_str);
+		}
+
+		table[cur_idx] = NULL;
 	}
 
-	new_str = NULL;
-	da_push_back(list, &new_str);
-
-	return list.array;
+	return (char**)out;
 }
 
 void strlist_free(char **strlist)
 {
-	if (strlist) {
-		char **temp = strlist;
-		while (*temp)
-			bfree(*(temp++));
-
-		bfree(strlist);
-	}
+	bfree(strlist);
 }
 
 void dstr_init_copy_strref(struct dstr *dst, const struct strref *src)

@@ -277,12 +277,14 @@ static void sp_parse_struct(struct shader_parser *sp)
 
 		case PARSE_UNEXPECTED_CONTINUE:
 			cf_adderror_syntax_error(&sp->cfp);
+			/* Falls through. */
 		case PARSE_CONTINUE:
 			shader_var_free(&var);
 			continue;
 
 		case PARSE_UNEXPECTED_BREAK:
 			cf_adderror_syntax_error(&sp->cfp);
+			/* Falls through. */
 		case PARSE_BREAK:
 			shader_var_free(&var);
 			do_break = true;
@@ -332,16 +334,40 @@ static inline int sp_parse_func_param(struct shader_parser *sp,
 		struct shader_var *var)
 {
 	int code;
-	bool is_uniform = false;
+	bool var_type_keyword = false;
 
 	if (!cf_next_valid_token(&sp->cfp))
 		return PARSE_EOF;
 
-	code = sp_check_for_keyword(sp, "uniform", &is_uniform);
+	code = sp_check_for_keyword(sp, "in", &var_type_keyword);
 	if (code == PARSE_EOF)
 		return PARSE_EOF;
+	else if (var_type_keyword)
+		var->var_type = SHADER_VAR_IN;
 
-	var->var_type = is_uniform ? SHADER_VAR_UNIFORM : SHADER_VAR_NONE;
+	if (!var_type_keyword) {
+		code = sp_check_for_keyword(sp, "inout", &var_type_keyword);
+		if (code == PARSE_EOF)
+			return PARSE_EOF;
+		else if (var_type_keyword)
+			var->var_type = SHADER_VAR_INOUT;
+	}
+
+	if (!var_type_keyword) {
+		code = sp_check_for_keyword(sp, "out", &var_type_keyword);
+		if (code == PARSE_EOF)
+			return PARSE_EOF;
+		else if (var_type_keyword)
+			var->var_type = SHADER_VAR_OUT;
+	}
+
+	if (!var_type_keyword) {
+		code = sp_check_for_keyword(sp, "uniform", &var_type_keyword);
+		if (code == PARSE_EOF)
+			return PARSE_EOF;
+		else if (var_type_keyword)
+			var->var_type = SHADER_VAR_UNIFORM;
+	}
 
 	code = cf_get_name(&sp->cfp, &var->type, "type", ")");
 	if (code != PARSE_SUCCESS)

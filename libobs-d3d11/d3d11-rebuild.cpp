@@ -40,6 +40,7 @@ void gs_texture_2d::RebuildSharedTextureFallback()
 	td.Format           = DXGI_FORMAT_B8G8R8A8_UNORM;
 	td.ArraySize        = 1;
 	td.SampleDesc.Count = 1;
+	td.BindFlags        = D3D11_BIND_SHADER_RESOURCE;
 
 	width      = td.Width;
 	height     = td.Height;
@@ -304,7 +305,11 @@ try {
 			((gs_pixel_shader*)obj)->Rebuild(dev);
 			break;
 		case gs_type::gs_duplicator:
-			((gs_duplicator*)obj)->Start();
+			try {
+				((gs_duplicator*)obj)->Start();
+			} catch (...) {
+				((gs_duplicator*)obj)->Release();
+			}
 			break;
 		case gs_type::gs_swap_chain:
 			((gs_swap_chain*)obj)->Rebuild(dev);

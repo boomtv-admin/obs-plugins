@@ -854,7 +854,7 @@ static inline void set_item_def(struct obs_data *data, obs_data_item_t **item,
 		item = &actual_item;
 	}
 
-	if (item && *item && (*item)->type == type)
+	if (item && *item && (*item)->type != type)
 		return;
 
 	set_item_data(data, item, name, ptr, size, type, true, false);
@@ -1317,6 +1317,19 @@ void obs_data_array_insert(obs_data_array_t *array, size_t idx, obs_data_t *obj)
 
 	os_atomic_inc_long(&obj->ref);
 	da_insert(array->objects, idx, &obj);
+}
+
+void obs_data_array_push_back_array(obs_data_array_t *array,
+		obs_data_array_t *array2)
+{
+	if (!array || !array2)
+		return;
+
+	for (size_t i = 0; i < array2->objects.num; i++) {
+		obs_data_t *obj = array2->objects.array[i];
+		obs_data_addref(obj);
+	}
+	da_push_back_da(array->objects, array2->objects);
 }
 
 void obs_data_array_erase(obs_data_array_t *array, size_t idx)

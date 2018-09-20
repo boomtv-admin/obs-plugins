@@ -53,8 +53,14 @@ LIBVLC_MEDIA_LIST_PLAYER_SET_MEDIA_PLAYER libvlc_media_list_player_set_media_pla
 LIBVLC_MEDIA_LIST_PLAYER_SET_MEDIA_LIST libvlc_media_list_player_set_media_list_;
 LIBVLC_MEDIA_LIST_PLAYER_EVENT_MANAGER libvlc_media_list_player_event_manager_;
 LIBVLC_MEDIA_LIST_PLAYER_SET_PLAYBACK_MODE libvlc_media_list_player_set_playback_mode_;
+LIBVLC_MEDIA_LIST_PLAYER_NEXT libvlc_media_list_player_next_;
+LIBVLC_MEDIA_LIST_PLAYER_PREVIOUS libvlc_media_list_player_previous_;
 
 void *libvlc_module = NULL;
+#ifdef __APPLE__
+void *libvlc_core_module = NULL;
+#endif
+
 libvlc_instance_t *libvlc = NULL;
 uint64_t time_start = 0;
 
@@ -115,6 +121,8 @@ static bool load_vlc_funcs(void)
 	LOAD_VLC_FUNC(libvlc_media_list_player_set_media_list);
 	LOAD_VLC_FUNC(libvlc_media_list_player_event_manager);
 	LOAD_VLC_FUNC(libvlc_media_list_player_set_playback_mode);
+	LOAD_VLC_FUNC(libvlc_media_list_player_next);
+	LOAD_VLC_FUNC(libvlc_media_list_player_previous);
 	return true;
 }
 
@@ -150,8 +158,14 @@ static bool load_libvlc_module(void)
 
 #ifdef __APPLE__
 #define LIBVLC_DIR "/Applications/VLC.app/Contents/MacOS/"
+/* According to otoolo -L, this is what libvlc.dylib wants. */
+#define LIBVLC_CORE_FILE LIBVLC_DIR "lib/libvlccore.dylib"
 #define LIBVLC_FILE LIBVLC_DIR "lib/libvlc.5.dylib"
 	setenv("VLC_PLUGIN_PATH", LIBVLC_DIR "plugins", false);
+	libvlc_core_module = os_dlopen(LIBVLC_CORE_FILE);
+
+	if (!libvlc_core_module)
+		return false;
 #else
 #define LIBVLC_FILE "libvlc.so.5"
 #endif
@@ -200,6 +214,10 @@ void obs_module_unload(void)
 {
 	if (libvlc)
 		libvlc_release_(libvlc);
+#ifdef __APPLE__
+	if (libvlc_core_module)
+		os_dlclose(libvlc_core_module);
+#endif
 	if (libvlc_module)
 		os_dlclose(libvlc_module);
 }

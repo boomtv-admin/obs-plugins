@@ -42,7 +42,6 @@ struct nvenc_encoder {
 	AVCodec                        *nvenc;
 	AVCodecContext                 *context;
 
-	AVPicture                      dst_picture;
 	AVFrame                        *vframe;
 
 	DARRAY(uint8_t)                buffer;
@@ -108,16 +107,13 @@ static bool nvenc_init_codec(struct nvenc_encoder *enc)
 	enc->vframe->colorspace = enc->context->colorspace;
 	enc->vframe->color_range = enc->context->color_range;
 
-	ret = avpicture_alloc(&enc->dst_picture, enc->context->pix_fmt,
-			enc->context->width, enc->context->height);
+	ret = av_frame_get_buffer(enc->vframe, base_get_alignment());
 	if (ret < 0) {
-		warn("Failed to allocate dst_picture: %s", av_err2str(ret));
+		warn("Failed to allocate vframe: %s", av_err2str(ret));
 		return false;
 	}
 
 	enc->initialized = true;
-
-	*((AVPicture*)enc->vframe) = enc->dst_picture;
 	return true;
 }
 
@@ -157,10 +153,6 @@ static bool nvenc_update(void *data, obs_data_t *settings)
 		     "common settings)");
 		rc = "CBR";
 	}
-
-	/* The "default" preset has been deprecated */
-	if (preset && astrcmpi(preset, "default") == 0)
-		preset = "hq";
 
 	info.format = voi->format;
 	info.colorspace = voi->colorspace;
@@ -249,18 +241,23 @@ static void nvenc_destroy(void *data)
 		int r_pkt = 1;
 
 		while (r_pkt) {
+#if LIBAVFORMAT_VERSION_INT >= AV_VERSION_INT(57, 40, 101)
+			if (avcodec_receive_packet(enc->context, &pkt) < 0)
+				break;
+#else
 			if (avcodec_encode_video2(enc->context, &pkt, NULL,
 						&r_pkt) < 0)
 				break;
+#endif
 
 			if (r_pkt)
-				av_free_packet(&pkt);
+				av_packet_unref(&pkt);
 		}
 	}
 
 	avcodec_close(enc->context);
+	av_frame_unref(enc->vframe);
 	av_frame_free(&enc->vframe);
-	avpicture_free(&enc->dst_picture);
 	da_free(enc->buffer);
 	bfree(enc->header);
 	bfree(enc->sei);
@@ -304,7 +301,7 @@ fail:
 	return NULL;
 }
 
-static inline void copy_data(AVPicture *pic, const struct encoder_frame *frame,
+static inline void copy_data(AVFrame *pic, const struct encoder_frame *frame,
 		int height, enum AVPixelFormat format)
 {
 	int h_chroma_shift, v_chroma_shift;
@@ -340,11 +337,22 @@ static bool nvenc_encode(void *data, struct encoder_frame *frame,
 
 	av_init_packet(&av_pkt);
 
-	copy_data(&enc->dst_picture, frame, enc->height, enc->context->pix_fmt);
+	copy_data(enc->vframe, frame, enc->height, enc->context->pix_fmt);
 
 	enc->vframe->pts = frame->pts;
+#if LIBAVFORMAT_VERSION_INT >= AV_VERSION_INT(57, 40, 101)
+	ret = avcodec_send_frame(enc->context, enc->vframe);
+	if (ret == 0)
+		ret = avcodec_receive_packet(enc->context, &av_pkt);
+
+	got_packet = (ret == 0);
+
+	if (ret == AVERROR_EOF || ret == AVERROR(EAGAIN))
+		ret = 0;
+#else
 	ret = avcodec_encode_video2(enc->context, &av_pkt, enc->vframe,
 			&got_packet);
+#endif
 	if (ret < 0) {
 		warn("nvenc_encode: Error encoding: %s", av_err2str(ret));
 		return false;
@@ -378,7 +386,7 @@ static bool nvenc_encode(void *data, struct encoder_frame *frame,
 		*received_packet = false;
 	}
 
-	av_free_packet(&av_pkt);
+	av_packet_unref(&av_pkt);
 	return true;
 }
 
@@ -388,7 +396,7 @@ static void nvenc_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "keyint_sec", 0);
 	obs_data_set_default_int(settings, "cqp", 23);
 	obs_data_set_default_string(settings, "rate_control", "CBR");
-	obs_data_set_default_string(settings, "preset", "hq");
+	obs_data_set_default_string(settings, "preset", "default");
 	obs_data_set_default_string(settings, "profile", "main");
 	obs_data_set_default_string(settings, "level", "auto");
 	obs_data_set_default_bool(settings, "2pass", true);
@@ -452,6 +460,7 @@ static obs_properties_t *nvenc_properties(void *unused)
 #define add_preset(val) \
 	obs_property_list_add_string(p, obs_module_text("NVENC.Preset." val), \
 			val)
+	add_preset("default");
 	add_preset("hq");
 	add_preset("hp");
 	add_preset("bd");

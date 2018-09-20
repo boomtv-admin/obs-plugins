@@ -22,9 +22,17 @@ extern "C" {
 #endif
 
 typedef size_t obs_hotkey_id;
-#define OBS_INVALID_HOTKEY_ID (~(obs_hotkey_id)0)
 typedef size_t obs_hotkey_pair_id;
+
+#ifndef SWIG
+#define OBS_INVALID_HOTKEY_ID (~(obs_hotkey_id)0)
 #define OBS_INVALID_HOTKEY_PAIR_ID (~(obs_hotkey_pair_id)0)
+#else
+const size_t OBS_INVALID_HOTKEY_ID = (size_t)-1;
+const size_t OBS_INVALID_HOTKEY_PAIR_ID = (size_t)-1;
+#endif
+
+#define XINPUT_MOUSE_LEN 33
 
 enum obs_key {
 #define OBS_HOTKEY(x) x,
@@ -52,6 +60,8 @@ enum obs_hotkey_registerer_type {
 };
 typedef enum obs_hotkey_registerer_type obs_hotkey_registerer_t;
 
+/* getter functions */
+
 EXPORT obs_hotkey_id obs_hotkey_get_id(const obs_hotkey_t *key);
 EXPORT const char *obs_hotkey_get_name(const obs_hotkey_t *key);
 EXPORT const char *obs_hotkey_get_description(const obs_hotkey_t *key);
@@ -68,6 +78,16 @@ EXPORT obs_hotkey_id obs_hotkey_binding_get_hotkey_id(
 EXPORT obs_hotkey_t *obs_hotkey_binding_get_hotkey(
 		obs_hotkey_binding_t *binding);
 
+/* setter functions */
+
+EXPORT void obs_hotkey_set_name(obs_hotkey_id id, const char *name);
+EXPORT void obs_hotkey_set_description(obs_hotkey_id id, const char *desc);
+EXPORT void obs_hotkey_pair_set_names(obs_hotkey_pair_id id,
+		const char *name0, const char *name1);
+EXPORT void obs_hotkey_pair_set_descriptions(obs_hotkey_pair_id id,
+		const char *desc0, const char *desc1);
+
+#ifndef SWIG
 struct obs_hotkeys_translations {
 	const char *insert;
 	const char *del;
@@ -115,6 +135,7 @@ struct obs_hotkeys_translations {
  * the default English translations for that specific operating system. */
 EXPORT void obs_hotkeys_set_translations_s(
 		struct obs_hotkeys_translations *translations, size_t size);
+#endif
 
 #define obs_hotkeys_set_translations(translations) \
 	obs_hotkeys_set_translations_s(translations, \
@@ -215,6 +236,10 @@ EXPORT void obs_hotkey_pair_load(obs_hotkey_pair_id id, obs_data_array_t *data0,
 
 EXPORT obs_data_array_t *obs_hotkey_save(obs_hotkey_id id);
 
+EXPORT void obs_hotkey_pair_save(obs_hotkey_pair_id id,
+		obs_data_array_t **p_data0,
+		obs_data_array_t **p_data1);
+
 EXPORT obs_data_t *obs_hotkeys_save_encoder(obs_encoder_t *encoder);
 
 EXPORT obs_data_t *obs_hotkeys_save_output(obs_output_t *output);
@@ -277,7 +302,7 @@ EXPORT int obs_key_to_virtual_key(obs_key_t key);
 EXPORT const char *obs_key_to_name(obs_key_t key);
 EXPORT obs_key_t obs_key_from_name(const char *name);
 
-inline bool obs_key_combination_is_empty(obs_key_combination_t combo)
+static inline bool obs_key_combination_is_empty(obs_key_combination_t combo)
 {
 	return !combo.modifiers && combo.key == OBS_KEY_NONE;
 }

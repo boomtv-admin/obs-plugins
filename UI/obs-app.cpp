@@ -24,9 +24,10 @@
 #include <sstream>
 #include <mutex>
 #include <util/bmem.h>
-#include <util/dstr.h>
+#include <util/dstr.hpp>
 #include <util/platform.h>
 #include <util/profiler.hpp>
+#include <util/cf-parser.h>
 #include <obs-config.h>
 #include <obs.hpp>
 
@@ -60,8 +61,10 @@ static log_handler_t def_log_handler;
 
 static string currentLogFile;
 static string lastLogFile;
+static string lastCrashLogFile;
 
 bool portable_mode = false;
+static bool multi = false;
 static bool log_verbose = false;
 static bool unfiltered_log = false;
 bool opt_start_streaming = false;
@@ -75,8 +78,9 @@ string opt_starting_collection;
 string opt_starting_profile;
 string opt_starting_scene;
 
-// AMD PowerXpress High Performance Flags
+// GPU hint exports for AMD/NVIDIA laptops
 #ifdef _MSC_VER
+extern "C" __declspec(dllexport) DWORD NvOptimusEnablement = 1;
 extern "C" __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 #endif
 
@@ -164,6 +168,7 @@ QObject *CreateShortcutFilter()
 			case Qt::Key_Return:
 				if (dialog && pressed)
 					return false;
+				/* Falls through. */
 			default:
 				hotkey.key = obs_key_from_virtual_key(
 					event->nativeVirtualKey());
@@ -342,6 +347,7 @@ static void do_log(int log_level, const char *msg, va_list args, void *param)
 	}
 #else
 	def_log_handler(log_level, msg, args2, nullptr);
+	va_end(args2);
 #endif
 
 	if (log_level <= LOG_INFO || log_verbose) {
@@ -363,6 +369,7 @@ bool OBSApp::InitGlobalConfigDefaults()
 	config_set_default_string(globalConfig, "General", "Language",
 			DEFAULT_LANG);
 	config_set_default_uint(globalConfig, "General", "MaxLogs", 10);
+	config_set_default_int(globalConfig, "General", "InfoIncrement", -1);
 	config_set_default_string(globalConfig, "General", "ProcessPriority",
 			"Normal");
 	config_set_default_bool(globalConfig, "General", "EnableAutoUpdates",
@@ -410,9 +417,30 @@ bool OBSApp::InitGlobalConfigDefaults()
 	config_set_default_bool(globalConfig, "BasicWindow",
 			"ShowStatusBar", true);
 
+	if (!config_get_bool(globalConfig, "General", "Pre21Defaults")) {
+		config_set_default_string(globalConfig, "General",
+				"CurrentTheme", "Dark");
+	}
+
+	config_set_default_bool(globalConfig, "BasicWindow",
+			"VerticalVolControl", false);
+
+	config_set_default_bool(globalConfig, "BasicWindow",
+			"MultiviewMouseSwitch", true);
+
+	config_set_default_bool(globalConfig, "BasicWindow",
+			"MultiviewDrawNames", true);
+
+	config_set_default_bool(globalConfig, "BasicWindow",
+			"MultiviewDrawAreas", true);
+
 #ifdef _WIN32
+	uint32_t winver = GetWindowsVersion();
+
 	config_set_default_bool(globalConfig, "Audio", "DisableAudioDucking",
 			true);
+	config_set_default_bool(globalConfig, "General", "BrowserHWAccel",
+			winver > 0x601);
 #endif
 
 #ifdef __APPLE__
@@ -580,6 +608,42 @@ static string GetSceneCollectionFileFromName(const char *name)
 	return outputPath;
 }
 
+bool OBSApp::UpdatePre22MultiviewLayout(const char *layout)
+{
+	if (!layout)
+		return false;
+
+	if (astrcmpi(layout, "horizontaltop") == 0) {
+		config_set_int(globalConfig, "BasicWindow", "MultiviewLayout",
+			static_cast<int>(
+				MultiviewLayout::HORIZONTAL_TOP_8_SCENES));
+		return true;
+	}
+
+	if (astrcmpi(layout, "horizontalbottom") == 0) {
+		config_set_int(globalConfig, "BasicWindow", "MultiviewLayout",
+			static_cast<int>(
+				MultiviewLayout::HORIZONTAL_BOTTOM_8_SCENES));
+		return true;
+	}
+
+	if (astrcmpi(layout, "verticalleft") == 0) {
+		config_set_int(globalConfig, "BasicWindow", "MultiviewLayout",
+			static_cast<int>(
+				MultiviewLayout::VERTICAL_LEFT_8_SCENES));
+		return true;
+	}
+
+	if (astrcmpi(layout, "verticalright") == 0) {
+		config_set_int(globalConfig, "BasicWindow", "MultiviewLayout",
+			static_cast<int>(
+				MultiviewLayout::VERTICAL_RIGHT_8_SCENES));
+		return true;
+	}
+
+	return false;
+}
+
 bool OBSApp::InitGlobalConfig()
 {
 	char path[512];
@@ -632,6 +696,24 @@ bool OBSApp::InitGlobalConfig()
 		config_set_bool(globalConfig, "General", "Pre19Defaults",
 				useOldDefaults);
 		changed = true;
+	}
+
+	if (!config_has_user_value(globalConfig, "General", "Pre21Defaults")) {
+		uint32_t lastVersion = config_get_int(globalConfig, "General",
+				"LastVersion");
+		bool useOldDefaults = lastVersion &&
+		    lastVersion < MAKE_SEMANTIC_VERSION(21, 0, 0);
+
+		config_set_bool(globalConfig, "General", "Pre21Defaults",
+				useOldDefaults);
+		changed = true;
+	}
+
+	if (config_has_user_value(globalConfig, "BasicWindow",
+			"MultiviewLayout")) {
+		const char *layout = config_get_string(globalConfig,
+				"BasicWindow", "MultiviewLayout");
+		changed |= UpdatePre22MultiviewLayout(layout);
 	}
 
 	if (changed)
@@ -708,6 +790,192 @@ bool OBSApp::InitLocale()
 	return true;
 }
 
+void OBSApp::AddExtraThemeColor(QPalette &pal, int group,
+		const char *name, uint32_t color)
+{
+	std::function<void(QPalette::ColorGroup)> func;
+
+#define DEF_PALETTE_ASSIGN(name) \
+	do { \
+		func = [&] (QPalette::ColorGroup group) \
+		{ \
+			pal.setColor(group, QPalette::name, \
+					QColor::fromRgb(color)); \
+		}; \
+	} while (false)
+
+	if (astrcmpi(name, "alternateBase") == 0) {
+		DEF_PALETTE_ASSIGN(AlternateBase);
+	} else if (astrcmpi(name, "base") == 0) {
+		DEF_PALETTE_ASSIGN(Base);
+	} else if (astrcmpi(name, "brightText") == 0) {
+		DEF_PALETTE_ASSIGN(BrightText);
+	} else if (astrcmpi(name, "button") == 0) {
+		DEF_PALETTE_ASSIGN(Button);
+	} else if (astrcmpi(name, "buttonText") == 0) {
+		DEF_PALETTE_ASSIGN(ButtonText);
+	} else if (astrcmpi(name, "brightText") == 0) {
+		DEF_PALETTE_ASSIGN(BrightText);
+	} else if (astrcmpi(name, "dark") == 0) {
+		DEF_PALETTE_ASSIGN(Dark);
+	} else if (astrcmpi(name, "highlight") == 0) {
+		DEF_PALETTE_ASSIGN(Highlight);
+	} else if (astrcmpi(name, "highlightedText") == 0) {
+		DEF_PALETTE_ASSIGN(HighlightedText);
+	} else if (astrcmpi(name, "light") == 0) {
+		DEF_PALETTE_ASSIGN(Light);
+	} else if (astrcmpi(name, "link") == 0) {
+		DEF_PALETTE_ASSIGN(Link);
+	} else if (astrcmpi(name, "linkVisited") == 0) {
+		DEF_PALETTE_ASSIGN(LinkVisited);
+	} else if (astrcmpi(name, "mid") == 0) {
+		DEF_PALETTE_ASSIGN(Mid);
+	} else if (astrcmpi(name, "midlight") == 0) {
+		DEF_PALETTE_ASSIGN(Midlight);
+	} else if (astrcmpi(name, "shadow") == 0) {
+		DEF_PALETTE_ASSIGN(Shadow);
+	} else if (astrcmpi(name, "text") == 0 ||
+	           astrcmpi(name, "foreground") == 0) {
+		DEF_PALETTE_ASSIGN(Text);
+	} else if (astrcmpi(name, "toolTipBase") == 0) {
+		DEF_PALETTE_ASSIGN(ToolTipBase);
+	} else if (astrcmpi(name, "toolTipText") == 0) {
+		DEF_PALETTE_ASSIGN(ToolTipText);
+	} else if (astrcmpi(name, "windowText") == 0) {
+		DEF_PALETTE_ASSIGN(WindowText);
+	} else if (astrcmpi(name, "window") == 0 ||
+	           astrcmpi(name, "background") == 0) {
+		DEF_PALETTE_ASSIGN(Window);
+	} else {
+		return;
+	}
+
+#undef DEF_PALETTE_ASSIGN
+
+	switch (group) {
+	case QPalette::Disabled:
+	case QPalette::Active:
+	case QPalette::Inactive:
+		func((QPalette::ColorGroup)group);
+		break;
+	default:
+		func((QPalette::ColorGroup)QPalette::Disabled);
+		func((QPalette::ColorGroup)QPalette::Active);
+		func((QPalette::ColorGroup)QPalette::Inactive);
+	}
+}
+
+struct CFParser {
+	cf_parser cfp = {};
+	inline ~CFParser() {cf_parser_free(&cfp);}
+	inline operator cf_parser*() {return &cfp;}
+	inline cf_parser *operator->() {return &cfp;}
+};
+
+void OBSApp::ParseExtraThemeData(const char *path)
+{
+	BPtr<char> data = os_quick_read_utf8_file(path);
+	QPalette pal = palette();
+	CFParser cfp;
+	int ret;
+
+	cf_parser_parse(cfp, data, path);
+
+	while (cf_go_to_token(cfp, "OBSTheme", nullptr)) {
+		if (!cf_next_token(cfp)) return;
+
+		int group = -1;
+
+		if (cf_token_is(cfp, ":")) {
+			ret = cf_next_token_should_be(cfp, ":", nullptr,
+					nullptr);
+			if (ret != PARSE_SUCCESS) continue;
+
+			if (!cf_next_token(cfp)) return;
+
+			if (cf_token_is(cfp, "disabled")) {
+				group = QPalette::Disabled;
+			} else if (cf_token_is(cfp, "active")) {
+				group = QPalette::Active;
+			} else if (cf_token_is(cfp, "inactive")) {
+				group = QPalette::Inactive;
+			} else {
+				continue;
+			}
+
+			if (!cf_next_token(cfp)) return;
+		}
+
+		if (!cf_token_is(cfp, "{")) continue;
+
+		for (;;) {
+			if (!cf_next_token(cfp)) return;
+
+			ret = cf_token_is_type(cfp, CFTOKEN_NAME, "name",
+					nullptr);
+			if (ret != PARSE_SUCCESS)
+				break;
+
+			DStr name;
+			dstr_copy_strref(name, &cfp->cur_token->str);
+
+			ret = cf_next_token_should_be(cfp, ":", ";",
+					nullptr);
+			if (ret != PARSE_SUCCESS) continue;
+
+			if (!cf_next_token(cfp)) return;
+
+			const char *array;
+			uint32_t color = 0;
+
+			if (cf_token_is(cfp, "#")) {
+				array = cfp->cur_token->str.array;
+				color = strtol(array + 1, nullptr, 16);
+
+			} else if (cf_token_is(cfp, "rgb")) {
+				ret = cf_next_token_should_be(cfp, "(", ";",
+						nullptr);
+				if (ret != PARSE_SUCCESS) continue;
+				if (!cf_next_token(cfp)) return;
+
+				array = cfp->cur_token->str.array;
+				color |= strtol(array, nullptr, 10) << 16;
+
+				ret = cf_next_token_should_be(cfp, ",", ";",
+						nullptr);
+				if (ret != PARSE_SUCCESS) continue;
+				if (!cf_next_token(cfp)) return;
+
+				array = cfp->cur_token->str.array;
+				color |= strtol(array, nullptr, 10) << 8;
+
+				ret = cf_next_token_should_be(cfp, ",", ";",
+						nullptr);
+				if (ret != PARSE_SUCCESS) continue;
+				if (!cf_next_token(cfp)) return;
+
+				array = cfp->cur_token->str.array;
+				color |= strtol(array, nullptr, 10);
+
+			} else if (cf_token_is(cfp, "white")) {
+				color = 0xFFFFFF;
+
+			} else if (cf_token_is(cfp, "black")) {
+				color = 0;
+			}
+
+			if (!cf_go_to_token(cfp, ";", nullptr)) return;
+
+			AddExtraThemeColor(pal, group, name->array, color);
+		}
+
+		ret = cf_token_should_be(cfp, "}", "}", nullptr);
+		if (ret != PARSE_SUCCESS) continue;
+	}
+
+	setPalette(pal);
+}
+
 bool OBSApp::SetTheme(std::string name, std::string path)
 {
 	theme = name;
@@ -729,21 +997,32 @@ bool OBSApp::SetTheme(std::string name, std::string path)
 	}
 
 	QString mpath = QString("file:///") + path.c_str();
+	setPalette(defaultPalette);
 	setStyleSheet(mpath);
+	ParseExtraThemeData(path.c_str());
+
+	emit StyleChanged();
 	return true;
 }
 
 bool OBSApp::InitTheme()
 {
+	defaultPalette = palette();
+
 	const char *themeName = config_get_string(globalConfig, "General",
-			"Theme");
+			"CurrentTheme");
+	if (!themeName) {
+		/* Use deprecated "Theme" value if available */
+		themeName = config_get_string(globalConfig,
+				"General", "Theme");
+		if (!themeName)
+			themeName = "Default";
+	}
 
-	if (!themeName)
-		themeName = "Default";
+	if (strcmp(themeName, "Default") != 0 && SetTheme(themeName))
+		return true;
 
-	stringstream t;
-	t << themeName;
-	return SetTheme(t.str());
+	return SetTheme("Default");
 }
 
 OBSApp::OBSApp(int &argc, char **argv, profiler_name_store_t *store)
@@ -892,6 +1171,9 @@ void OBSApp::AppInit()
 		EnableOSXVSync(false);
 #endif
 
+	enableHotkeysInFocus = !config_get_bool(globalConfig, "General",
+			"DisableHotkeysInFocus");
+
 	move_basic_to_profiles();
 	move_basic_to_scene_collections();
 
@@ -918,6 +1200,18 @@ static bool StartupOBS(const char *locale, profiler_name_store_t *store)
 	return obs_startup(locale, path, store);
 }
 
+inline void OBSApp::ResetHotkeyState(bool inFocus)
+{
+	obs_hotkey_enable_background_press(
+			inFocus || enableHotkeysInFocus);
+}
+
+void OBSApp::EnableInFocusHotkeys(bool enable)
+{
+	enableHotkeysInFocus = enable;
+	ResetHotkeyState(applicationState() != Qt::ApplicationActive);
+}
+
 bool OBSApp::OBSInit()
 {
 	ProfileScope("OBSApp::OBSInit");
@@ -936,6 +1230,19 @@ bool OBSApp::OBSInit()
 		if (!StartupOBS(locale.c_str(), GetProfilerNameStore()))
 			return false;
 
+#ifdef _WIN32
+		bool browserHWAccel = config_get_bool(globalConfig, "General",
+				"BrowserHWAccel");
+
+		obs_data_t *settings = obs_data_create();
+		obs_data_set_bool(settings, "BrowserHWAccel", browserHWAccel);
+		obs_apply_private_data(settings);
+		obs_data_release(settings);
+
+		blog(LOG_INFO, "Browser Hardware Acceleration: %s",
+				browserHWAccel ? "true" : "false");
+#endif
+
 		blog(LOG_INFO, "Portable mode: %s",
 				portable_mode ? "true" : "false");
 
@@ -949,13 +1256,12 @@ bool OBSApp::OBSInit()
 		mainWindow->OBSInit();
 
 		connect(this, &QGuiApplication::applicationStateChanged,
-				[](Qt::ApplicationState state)
+				[this](Qt::ApplicationState state)
 				{
-					obs_hotkey_enable_background_press(
+					ResetHotkeyState(
 						state != Qt::ApplicationActive);
 				});
-		obs_hotkey_enable_background_press(
-				applicationState() != Qt::ApplicationActive);
+		ResetHotkeyState(applicationState() != Qt::ApplicationActive);
 		return true;
 	} else {
 		return false;
@@ -978,7 +1284,9 @@ string OBSApp::GetVersionString() const
 
 #ifdef _WIN32
 	if (sizeof(void*) == 8)
-		ver << "64bit, ";
+		ver << "64-bit, ";
+	else
+		ver << "32-bit, ";
 
 	ver << "windows)";
 #elif __APPLE__
@@ -1028,6 +1336,11 @@ const char *OBSApp::GetCurrentLog() const
 	return currentLogFile.c_str();
 }
 
+const char *OBSApp::GetLastCrashLog() const
+{
+	return lastCrashLogFile.c_str();
+}
+
 bool OBSApp::TranslateString(const char *lookupVal, const char **out) const
 {
 	for (obs_frontend_translate_ui_cb cb : translatorHooks) {
@@ -1074,12 +1387,17 @@ static bool expect_token(lexer *lex, const char *str, base_token_type type)
 	return strref_cmp(&token.text, str) == 0;
 }
 
-static uint64_t convert_log_name(const char *name)
+static uint64_t convert_log_name(bool has_prefix, const char *name)
 {
 	BaseLexer  lex;
 	string     year, month, day, hour, minute, second;
 
 	lexer_start(lex, name);
+
+	if (has_prefix) {
+		string temp;
+		if (!get_token(lex, temp, BASETOKEN_ALPHA)) return 0;
+	}
 
 	if (!get_token(lex, year,   BASETOKEN_DIGIT)) return 0;
 	if (!expect_token(lex, "-", BASETOKEN_OTHER)) return 0;
@@ -1097,7 +1415,7 @@ static uint64_t convert_log_name(const char *name)
 	return std::stoull(timestring.str());
 }
 
-static void delete_oldest_file(const char *location)
+static void delete_oldest_file(bool has_prefix, const char *location)
 {
 	BPtr<char>       logDir(GetConfigPathPtr(location));
 	string           oldestLog;
@@ -1115,7 +1433,8 @@ static void delete_oldest_file(const char *location)
 			if (entry->directory || *entry->d_name == '.')
 				continue;
 
-			uint64_t ts = convert_log_name(entry->d_name);
+			uint64_t ts = convert_log_name(has_prefix,
+					entry->d_name);
 
 			if (ts) {
 				if (ts < oldest_ts) {
@@ -1138,9 +1457,10 @@ static void delete_oldest_file(const char *location)
 	}
 }
 
-static void get_last_log(void)
+static void get_last_log(bool has_prefix, const char *subdir_to_use,
+		std::string &last)
 {
-	BPtr<char>       logDir(GetConfigPathPtr("obs-studio/logs"));
+	BPtr<char>       logDir(GetConfigPathPtr(subdir_to_use));
 	struct os_dirent *entry;
 	os_dir_t         *dir        = os_opendir(logDir);
 	uint64_t         highest_ts = 0;
@@ -1150,11 +1470,12 @@ static void get_last_log(void)
 			if (entry->directory || *entry->d_name == '.')
 				continue;
 
-			uint64_t ts = convert_log_name(entry->d_name);
+			uint64_t ts = convert_log_name(has_prefix,
+					entry->d_name);
 
 			if (ts > highest_ts) {
-				lastLogFile = entry->d_name;
-				highest_ts  = ts;
+				last = entry->d_name;
+				highest_ts = ts;
 			}
 		}
 
@@ -1217,7 +1538,10 @@ static void create_log_file(fstream &logFile)
 {
 	stringstream dst;
 
-	get_last_log();
+	get_last_log(false, "obs-studio/logs", lastLogFile);
+#ifdef _WIN32
+	get_last_log(true, "obs-studio/crashes", lastCrashLogFile);
+#endif
 
 	currentLogFile = GenerateTimeDateFilename("txt");
 	dst << "obs-studio/logs/" << currentLogFile.c_str();
@@ -1235,7 +1559,7 @@ static void create_log_file(fstream &logFile)
 #endif
 
 	if (logFile.is_open()) {
-		delete_oldest_file("obs-studio/logs");
+		delete_oldest_file(false, "obs-studio/logs");
 		base_set_log_handler(do_log, &logFile);
 	} else {
 		blog(LOG_ERROR, "Failed to open log file");
@@ -1326,33 +1650,32 @@ static int run_program(fstream &logFile, int argc, char *argv[])
 
 	OBSApp program(argc, argv, profilerNameStore.get());
 	try {
+		bool created_log = false;
+
 		program.AppInit();
+		delete_oldest_file(false, "obs-studio/profiler_data");
 
 		OBSTranslator translator;
-
-		create_log_file(logFile);
-		delete_oldest_file("obs-studio/profiler_data");
-
 		program.installTranslator(&translator);
 
 #ifdef _WIN32
 		/* --------------------------------------- */
 		/* check and warn if already running       */
 
+		bool cancel_launch = false;
 		bool already_running = false;
 		RunOnceMutex rom = GetRunOnceMutex(already_running);
 
-		if (already_running) {
-			blog(LOG_WARNING, "\n================================");
-			blog(LOG_WARNING, "Warning: OBS is already running!");
-			blog(LOG_WARNING, "================================\n");
+		if (!already_running) {
+			goto run;
+		}
 
+		if (!multi) {
 			QMessageBox::StandardButtons buttons(
 					QMessageBox::Yes | QMessageBox::Cancel);
 			QMessageBox mb(QMessageBox::Question,
 					QTStr("AlreadyRunning.Title"),
-					QTStr("AlreadyRunning.Text"),
-					buttons,
+					QTStr("AlreadyRunning.Text"), buttons,
 					nullptr);
 			mb.setButtonText(QMessageBox::Yes,
 					QTStr("AlreadyRunning.LaunchAnyway"));
@@ -1361,19 +1684,45 @@ static int run_program(fstream &logFile, int argc, char *argv[])
 
 			QMessageBox::StandardButton button;
 			button = (QMessageBox::StandardButton)mb.exec();
-			if (button == QMessageBox::Cancel) {
-				blog(LOG_INFO, "User shut down the program "
-						"because OBS was already "
-						"running");
-				return 0;
-			}
+			cancel_launch = button == QMessageBox::Cancel;
+		}
 
-			blog(LOG_WARNING, "User is now running a secondary "
-					"instance of OBS!");
+		if (cancel_launch)
+			return 0;
+
+		if (!created_log) {
+			create_log_file(logFile);
+			created_log = true;
+		}
+
+		if (multi) {
+			blog(LOG_INFO, "User enabled --multi flag and is now "
+					"running multiple instances of OBS.");
+		} else {
+			blog(LOG_WARNING, "================================");
+			blog(LOG_WARNING, "Warning: OBS is already running!");
+			blog(LOG_WARNING, "================================");
+			blog(LOG_WARNING, "User is now running multiple "
+					"instances of OBS!");
 		}
 
 		/* --------------------------------------- */
+run:
 #endif
+
+		if (!created_log) {
+			create_log_file(logFile);
+			created_log = true;
+		}
+
+		if (argc > 1) {
+			stringstream stor;
+			stor << argv[1];
+			for (int i = 2; i < argc; ++i) {
+				stor << " " << argv[i];
+			}
+			blog(LOG_INFO, "Command Line Arguments: %s", stor.str().c_str());
+		}
 
 		if (!program.OBSInit())
 			return 0;
@@ -1406,7 +1755,7 @@ static void main_crash_handler(const char *format, va_list args, void *param)
 	vsnprintf(text, MAX_CRASH_REPORT_SIZE, format, args);
 	text[MAX_CRASH_REPORT_SIZE - 1] = 0;
 
-	delete_oldest_file("obs-studio/crashes");
+	delete_oldest_file(true, "obs-studio/crashes");
 
 	string name = "obs-studio/crashes/Crash ";
 	name += GenerateTimeDateFilename("txt");
@@ -1414,8 +1763,16 @@ static void main_crash_handler(const char *format, va_list args, void *param)
 	BPtr<char> path(GetConfigPathPtr(name.c_str()));
 
 	fstream file;
-	file.open(path, ios_base::in | ios_base::out | ios_base::trunc |
+
+#ifdef _WIN32
+	BPtr<wchar_t> wpath;
+	os_utf8_to_wcs_ptr(path, 0, &wpath);
+	file.open(wpath, ios_base::in | ios_base::out | ios_base::trunc |
 			ios_base::binary);
+#else
+	file.open(path,	ios_base::in | ios_base::out | ios_base::trunc |
+			ios_base::binary);
+#endif
 	file << text;
 	file.close();
 
@@ -1827,6 +2184,8 @@ int main(int argc, char *argv[])
 #endif
 
 #ifdef _WIN32
+	obs_init_win32_crash_handler();
+	SetErrorMode(SEM_FAILCRITICALERRORS);
 	load_debug_privilege();
 	base_set_crash_handler(main_crash_handler, nullptr);
 #endif
@@ -1840,6 +2199,9 @@ int main(int argc, char *argv[])
 	for (int i = 1; i < argc; i++) {
 		if (arg_is(argv[i], "--portable", "-p")) {
 			portable_mode = true;
+
+		} else if (arg_is(argv[i], "--multi", "-m")) {
+			multi = true;
 
 		} else if (arg_is(argv[i], "--verbose", nullptr)) {
 			log_verbose = true;
@@ -1889,7 +2251,8 @@ int main(int argc, char *argv[])
 			"--scene <string>: Start with specific scene.\n\n" <<
 			"--studio-mode: Enable studio mode.\n" <<
 			"--minimize-to-tray: Minimize to system tray.\n" <<
-			"--portable, -p: Use portable mode.\n\n" <<
+			"--portable, -p: Use portable mode.\n" <<
+			"--multi, -m: Don't warn when launching multiple instances.\n\n" <<
 			"--verbose: Make log more verbose.\n" <<
 			"--always-on-top: Start in 'always on top' mode.\n\n" <<
 			"--unfiltered_log: Make log unfiltered.\n\n" <<

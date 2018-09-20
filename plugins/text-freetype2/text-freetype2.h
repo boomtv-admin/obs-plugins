@@ -38,6 +38,7 @@ struct ft2_source {
 	char *text_file;
 	wchar_t *text;
 	time_t m_timestamp;
+	bool update_file;
 	uint64_t last_checked;
 
 	uint32_t cx, cy, max_h, custom_width;
@@ -59,6 +60,7 @@ struct ft2_source {
 	gs_effect_t *draw_effect;
 	bool outline_text, drop_shadow;
 	bool log_mode, word_wrap;
+	uint32_t log_lines;
 
 	obs_source_t *src;
 };

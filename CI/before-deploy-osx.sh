@@ -14,10 +14,14 @@ export FILENAME=$FILE_DATE-$GIT_HASH-$TRAVIS_BRANCH-osx.pkg
 
 cd ./build
 
-# Move the CEF plugin out before running build_app so that it doesn't get packaged twice
-hr "Moving CEF out to preserve linking"
-mv ./rundir/RelWithDebInfo/obs-plugins/CEF.app ./
-mv ./rundir/RelWithDebInfo/obs-plugins/obs-browser.so ./
+# Move obslua
+hr "Moving OBS LUA"
+mv ./rundir/RelWithDebInfo/data/obs-scripting/obslua.so ./rundir/RelWithDebInfo/bin/
+
+# Move obspython
+# hr "Moving OBS Python"
+# mv ./rundir/RelWithDebInfo/data/obs-scripting/_obspython.so ./rundir/RelWithDebInfo/bin/
+# mv ./rundir/RelWithDebInfo/data/obs-scripting/obspython.py ./rundir/RelWithDebInfo/bin/
 
 # Package everything into a nice .app
 hr "Packaging .app"
@@ -26,12 +30,20 @@ if [ -n "${TRAVIS_TAG}" ]; then
   STABLE=true
 fi
 
-sudo python ../CI/install/osx/build_app.py --public-key ../CI/install/osx/OBSPublicDSAKey.pem --sparkle-framework ../../sparkle/Sparkle.framework --base-url "https://obsproject.com/osx_update" --stable=$STABLE
+sudo python ../CI/install/osx/build_app.py --public-key ../CI/install/osx/OBSPublicDSAKey.pem --sparkle-framework ../../sparkle/Sparkle.framework --stable=$STABLE
 
-# Move the CEF plugin back to where it belongs
-hr "Moving CEF back"
-mv ./CEF.app ./rundir/RelWithDebInfo/obs-plugins/
-mv ./obs-browser.so ./rundir/RelWithDebInfo/obs-plugins/
+# Copy Chromium embedded framework to app Frameworks directory
+hr "Copying Chromium Embedded Framework.framework"
+sudo mkdir -p OBS.app/Contents/Frameworks
+sudo cp -r ../../cef_binary_${CEF_BUILD_VERSION}_macosx64/Release/Chromium\ Embedded\ Framework.framework OBS.app/Contents/Frameworks/
+sudo install_name_tool -change \
+	@rpath/Frameworks/Chromium\ Embedded\ Framework.framework/Chromium\ Embedded\ Framework \
+	../../Frameworks/Chromium\ Embedded\ Framework.framework/Chromium\ Embedded\ Framework \
+	OBS.app/Contents/Resources/obs-plugins/obs-browser.so
+sudo install_name_tool -change \
+	@rpath/Frameworks/Chromium\ Embedded\ Framework.framework/Chromium\ Embedded\ Framework \
+	../../Frameworks/Chromium\ Embedded\ Framework.framework/Chromium\ Embedded\ Framework \
+	OBS.app/Contents/Resources/obs-plugins/obs-browser-page
 
 # Package app
 hr "Generating .pkg"
@@ -47,8 +59,10 @@ security unlock-keychain -p mysecretpassword build.keychain
 security set-keychain-settings -t 3600 -u build.keychain
 hr "Importing certs into keychain"
 security import ./Certificates.p12 -k build.keychain -T /usr/bin/productsign -P ""
+# macOS 10.12+
+security set-key-partition-list -S apple-tool:,apple: -s -k mysecretpassword build.keychain
 hr "Signing Package"
-productsign --sign 'Developer ID Installer: Hugh Bailey (2MMRE5MTB8)' ./OBS.pkg ./$FILENAME
+productsign --sign 2MMRE5MTB8 ./OBS.pkg ./$FILENAME
 
 # Move to the folder that travis uses to upload artifacts from
 hr "Moving package to nightly folder for distribution"

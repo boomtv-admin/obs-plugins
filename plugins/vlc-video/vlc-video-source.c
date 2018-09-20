@@ -17,6 +17,7 @@
 #define S_BEHAVIOR_STOP_RESTART        "stop_restart"
 #define S_BEHAVIOR_PAUSE_UNPAUSE       "pause_unpause"
 #define S_BEHAVIOR_ALWAYS_PLAY         "always_play"
+#define S_NETWORK_CACHING              "network_caching"
 
 #define T_(text) obs_module_text(text)
 #define T_PLAYLIST                     T_("Playlist")
@@ -26,6 +27,7 @@
 #define T_BEHAVIOR_STOP_RESTART        T_("PlaybackBehavior.StopRestart")
 #define T_BEHAVIOR_PAUSE_UNPAUSE       T_("PlaybackBehavior.PauseUnpause")
 #define T_BEHAVIOR_ALWAYS_PLAY         T_("PlaybackBehavior.AlwaysPlay")
+#define T_NETWORK_CACHING              T_("NetworkCaching")
 
 /* ------------------------------------------------------------------------- */
 
@@ -55,6 +57,12 @@ struct vlc_source {
 	enum behavior behavior;
 	bool loop;
 	bool shuffle;
+
+	obs_hotkey_id play_pause_hotkey;
+	obs_hotkey_id restart_hotkey;
+	obs_hotkey_id stop_hotkey;
+	obs_hotkey_id playlist_next_hotkey;
+	obs_hotkey_id playlist_prev_hotkey;
 };
 
 static libvlc_media_t *get_media(struct darray *array, const char *path)
@@ -395,7 +403,7 @@ static int vlcs_audio_setup(void **p_data, char *format, unsigned *rate,
 }
 
 static void add_file(struct vlc_source *c, struct darray *array,
-		const char *path)
+		const char *path, int network_caching)
 {
 	DARRAY(struct media_file_data) new_files;
 	struct media_file_data data;
@@ -420,9 +428,14 @@ static void add_file(struct vlc_source *c, struct darray *array,
 		new_media = create_media_from_file(path);
 
 	if (new_media) {
-		if (is_url)
+		if (is_url) {
+			struct dstr network_caching_option = {0};
+			dstr_catf(&network_caching_option,
+					":network-caching=%d", network_caching);
 			libvlc_media_add_option_(new_media,
-					":network-caching=100");
+					network_caching_option.array);
+			dstr_free(&network_caching_option);
+		}
 
 		data.path = new_path.array;
 		data.media = new_media;
@@ -476,6 +489,7 @@ static void vlcs_update(void *data, obs_data_t *settings)
 	obs_data_array_t *array;
 	const char *behavior;
 	size_t count;
+	int network_caching;
 
 	da_init(new_files);
 	da_init(old_files);
@@ -486,6 +500,8 @@ static void vlcs_update(void *data, obs_data_t *settings)
 	c->loop = obs_data_get_bool(settings, S_LOOP);
 
 	behavior = obs_data_get_string(settings, S_BEHAVIOR);
+
+	network_caching = (int)obs_data_get_int(settings, S_NETWORK_CACHING);
 
 	if (astrcmpi(behavior, S_BEHAVIOR_PAUSE_UNPAUSE) == 0) {
 		c->behavior = BEHAVIOR_PAUSE_UNPAUSE;
@@ -523,13 +539,14 @@ static void vlcs_update(void *data, obs_data_t *settings)
 				dstr_copy(&dir_path, path);
 				dstr_cat_ch(&dir_path, '/');
 				dstr_cat(&dir_path, ent->d_name);
-				add_file(c, &new_files.da, dir_path.array);
+				add_file(c, &new_files.da, dir_path.array,
+						network_caching);
 			}
 
 			dstr_free(&dir_path);
 			os_closedir(dir);
 		} else {
-			add_file(c, &new_files.da, path);
+			add_file(c, &new_files.da, path, network_caching);
 		}
 
 		obs_data_release(item);
@@ -551,14 +568,27 @@ static void vlcs_update(void *data, obs_data_t *settings)
 	c->shuffle = obs_data_get_bool(settings, S_SHUFFLE);
 
 	if (c->files.num > 1 && c->shuffle) {
-		for (size_t i = 0; i < c->files.num - 1; i++) {
-			size_t j = i + rand() / (RAND_MAX
-					/ (c->files.num - i) + 1);
+		DARRAY(struct media_file_data) new_files;
+		DARRAY(size_t) idxs;
 
-			struct media_file_data t = c->files.array[j];
-			c->files.array[j] = c->files.array[i];
-			c->files.array[i] = t;
+		da_init(new_files);
+		da_init(idxs);
+		da_resize(idxs, c->files.num);
+		da_reserve(new_files, c->files.num);
+
+		for (size_t i = 0; i < c->files.num; i++) {
+			idxs.array[i] = i;
 		}
+		for (size_t i = idxs.num; i > 0; i--) {
+			size_t val = rand() % i;
+			size_t idx = idxs.array[val];
+			da_push_back(new_files, &c->files.array[idx]);
+			da_erase(idxs, val);
+		}
+
+		da_free(c->files);
+		da_free(idxs);
+		c->files.da = new_files.da;
 	}
 
 	/* ------------------------------------- */
@@ -600,10 +630,132 @@ static void vlcs_stopped(const struct libvlc_event_t *event, void *data)
 	UNUSED_PARAMETER(event);
 }
 
+static void vlcs_play_pause(void *data)
+{
+	struct vlc_source *c = data;
+
+	libvlc_media_list_player_pause_(c->media_list_player);
+}
+
+static void vlcs_restart(void *data)
+{
+	struct vlc_source *c = data;
+
+	libvlc_media_list_player_stop_(c->media_list_player);
+	libvlc_media_list_player_play_(c->media_list_player);
+}
+
+static void vlcs_stop(void *data)
+{
+	struct vlc_source *c = data;
+
+	libvlc_media_list_player_stop_(c->media_list_player);
+	obs_source_output_video(c->source, NULL);
+}
+
+static void vlcs_playlist_next(void *data)
+{
+	struct vlc_source *c = data;
+
+	libvlc_media_list_player_next_(c->media_list_player);
+}
+
+static void vlcs_playlist_prev(void *data)
+{
+	struct vlc_source *c = data;
+
+	libvlc_media_list_player_previous_(c->media_list_player);
+}
+
+static void vlcs_play_pause_hotkey(void *data, obs_hotkey_id id,
+		obs_hotkey_t *hotkey, bool pressed)
+{
+	UNUSED_PARAMETER(id);
+	UNUSED_PARAMETER(hotkey);
+
+	struct vlc_source *c = data;
+
+	if (pressed && obs_source_active(c->source))
+		vlcs_play_pause(c);
+}
+
+static void vlcs_restart_hotkey(void *data, obs_hotkey_id id,
+		obs_hotkey_t *hotkey, bool pressed)
+{
+	UNUSED_PARAMETER(id);
+	UNUSED_PARAMETER(hotkey);
+
+	struct vlc_source *c = data;
+
+	if (pressed && obs_source_active(c->source))
+		vlcs_restart(c);
+}
+
+static void vlcs_stop_hotkey(void *data, obs_hotkey_id id,
+		obs_hotkey_t *hotkey, bool pressed)
+{
+	UNUSED_PARAMETER(id);
+	UNUSED_PARAMETER(hotkey);
+
+	struct vlc_source *c = data;
+
+	if (pressed && obs_source_active(c->source))
+		vlcs_stop(c);
+}
+
+static void vlcs_playlist_next_hotkey(void *data, obs_hotkey_id id,
+		obs_hotkey_t *hotkey, bool pressed)
+{
+	UNUSED_PARAMETER(id);
+	UNUSED_PARAMETER(hotkey);
+
+	struct vlc_source *c = data;
+
+	if (pressed && obs_source_active(c->source))
+		vlcs_playlist_next(c);
+}
+
+static void vlcs_playlist_prev_hotkey(void *data, obs_hotkey_id id,
+		obs_hotkey_t *hotkey, bool pressed)
+{
+	UNUSED_PARAMETER(id);
+	UNUSED_PARAMETER(hotkey);
+
+	struct vlc_source *c = data;
+
+	if (pressed && obs_source_active(c->source))
+		vlcs_playlist_prev(c);
+}
+
 static void *vlcs_create(obs_data_t *settings, obs_source_t *source)
 {
 	struct vlc_source *c = bzalloc(sizeof(*c));
 	c->source = source;
+
+	c->play_pause_hotkey = obs_hotkey_register_source(source,
+			"VLCSource.PlayPause",
+			obs_module_text("PlayPause"),
+			vlcs_play_pause_hotkey, c);
+
+	c->restart_hotkey = obs_hotkey_register_source(source,
+			"VLCSource.Restart",
+			obs_module_text("Restart"),
+			vlcs_restart_hotkey, c);
+
+	c->stop_hotkey = obs_hotkey_register_source(source,
+			"VLCSource.Stop",
+			obs_module_text("Stop"),
+			vlcs_stop_hotkey, c);
+
+	c->playlist_next_hotkey = obs_hotkey_register_source(source,
+			"VLCSource.PlaylistNext",
+			obs_module_text("PlaylistNext"),
+			vlcs_playlist_next_hotkey, c);
+
+	c->playlist_prev_hotkey = obs_hotkey_register_source(source,
+			"VLCSource.PlaylistPrev",
+			obs_module_text("PlaylistPrev"),
+			vlcs_playlist_prev_hotkey, c);
 
 	pthread_mutex_init_value(&c->mutex);
 	if (pthread_mutex_init(&c->mutex, NULL) != 0)
@@ -680,6 +832,7 @@ static void vlcs_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, S_SHUFFLE, false);
 	obs_data_set_default_string(settings, S_BEHAVIOR,
 			S_BEHAVIOR_STOP_RESTART);
+	obs_data_set_default_int(settings, S_NETWORK_CACHING, 400);
 }
 
 static obs_properties_t *vlcs_properties(void *data)
@@ -691,6 +844,7 @@ static obs_properties_t *vlcs_properties(void *data)
 	struct dstr path = {0};
 	obs_property_t *p;
 
+	obs_properties_set_flags(ppts, OBS_PROPERTIES_DEFER_UPDATE);
 	obs_properties_add_bool(ppts, S_LOOP, T_LOOP);
 	obs_properties_add_bool(ppts, S_SHUFFLE, T_SHUFFLE);
 
@@ -746,13 +900,18 @@ static obs_properties_t *vlcs_properties(void *data)
 	dstr_free(&filter);
 	dstr_free(&exts);
 
+	obs_properties_add_int(ppts, S_NETWORK_CACHING, T_NETWORK_CACHING,
+			100, 60000, 10);
+
 	return ppts;
 }
 
 struct obs_source_info vlc_source_info = {
 	.id = "vlc_source",
 	.type = OBS_SOURCE_TYPE_INPUT,
-	.output_flags = OBS_SOURCE_ASYNC_VIDEO | OBS_SOURCE_AUDIO,
+	.output_flags = OBS_SOURCE_ASYNC_VIDEO |
+	                OBS_SOURCE_AUDIO |
+	                OBS_SOURCE_DO_NOT_DUPLICATE,
 	.get_name = vlcs_get_name,
 	.create = vlcs_create,
 	.destroy = vlcs_destroy,

@@ -28,6 +28,44 @@
 /* rgb(42,130,218); /* blue */
 
 
+/* Custom theme information.  This will set the application's QPalette, as
+ * well as pass to QML via the OBSTheme object.
+ * Can also use OBSTheme::disabled, OBSTheme::active, and OBSTheme::inactive.
+ * Using it without will set all three (making 'active' a bit redundant) */
+OBSTheme {
+    window: rgb(58,57,58); /* dark */
+    windowText: rgb(225,224,225); /* veryLight */
+    base: rgb(31,30,31); /* veryDark */
+    alternateBase: rgb(11,10,11); /* veryVeryDark */
+    text: rgb(225,224,225); /* veryLight */
+    button: rgb(88,87,88); /* kindaDark */
+    buttonText: rgb(225,224,225); /* veryLight */
+    brightText: rgb(200,199,200); /* lighter */
+
+    light: rgb(88,87,88); /* kindaDark */
+    mid: rgb(58,57,58); /* dark */
+    dark: rgb(31,30,31); /* veryDark */
+    shadow: rgb(11,10,11); /* veryVeryDark */
+
+    highlight: rgb(42,130,218); /* blue */
+    highlightText: rgb(0,0,0);
+
+    link: rgb(114, 162, 255); /* OBS blue */
+    linkVisited: rgb(114, 162, 255); /* OBS blue */
+}
+
+OBSTheme::disabled {
+    text: rgb(122,121,122); /* light */
+    buttonText: rgb(122,121,122); /* light */
+    brightText: rgb(122,121,122); /* light */
+}
+
+OBSTheme::inactive {
+    highlight: rgb(48,47,48);
+    highlightText: rgb(255, 255, 255);
+}
+
+
 /* General style, we override only what is needed. */
 QWidget {
     background-color: rgb(58,57,58); /* dark */
@@ -67,6 +105,31 @@ QListWidget::item:selected:!active {
     background-color: rgb(48,47,48);
 }
 
+/* Dock Widget */
+
+QDockWidget::title {
+    text-align: center;
+    background-color: QLinearGradient(x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 rgb(86,85,86),
+        stop: 0.1 rgb(82,81,82),
+        stop: 0.5 rgb(78,77,78),
+        stop: 0.9 rgb(74,73,74),
+        stop: 1 rgb(70,69,70));
+}
+
+QDockWidget::close-button, QDockWidget::float-button {
+    border: 1px solid transparent;
+    background: transparent;
+    padding: 0px;
+}
+
+QDockWidget::close-button:hover, QDockWidget::float-button:hover {
+    background: transparent;
+}
+
+QDockWidget::close-button:pressed, QDockWidget::float-button:pressed {
+    padding: 1px -1px -1px 1px;
+}
 
 /* Group Box */
 
@@ -180,6 +243,10 @@ QToolButton:pressed {
     qproperty-icon: url(./Dark/cogwheel.png);
 }
 
+* [themeID="refreshIconSmall"] {
+    qproperty-icon: url(./Dark/refresh.png);
+}
+
 * [themeID="upArrowIconSmall"] {
     qproperty-icon: url(./Dark/up_arrow.png);
 }
@@ -202,14 +269,24 @@ QTabWidget::tab-bar {
 QTabBar::tab {
     background-color: rgb(88,87,88); /* kindaDark */
     border: none;
+    padding: 5px;
+    min-width: 50px;
+    margin: 1px;
+}
+
+QTabBar::tab:top {
+    border-bottom: 1px transparent;
     border-top-left-radius: 5px;
     border-top-right-radius: 5px;
-    min-width: 8ex;
-    padding-top: 4px;
-    padding-bottom: 4px;
-    padding-left: 10px;
-    padding-right: 10px;
-    margin-right: 1px;
+
+}
+
+QTabBar::tab:bottom {
+    padding-top: 1px;
+    margin-bottom: 4px;
+    border-bottom-left-radius: 5px;
+    border-bottom-right-radius: 5px;
+    height: 14px;
 }
 
 QTabBar::tab:selected {
@@ -374,13 +451,19 @@ QPushButton:checked {
     background-color: rgb(122,121,122); /* light */
 }
 
+QPushButton::menu-indicator {
+    image: url(./Dark/down_arrow.png);
+    subcontrol-position: right;
+    subcontrol-origin: padding;
+    width: 25px;
+}
 
 /* Sliders */
 
 QSlider::groove:horizontal {
-    background-color: QLinearGradient(x1: 0, y1: 0, x2: 0, y2: 1,
-        stop: 0 rgb(31,30,31), /* veryDark */
-        stop: 0.75 rgb(50, 49, 50));
+    background-color: QLinearGradient(x1: 0, y1: 1, x2: 0, y2: 0,
+        stop: 0 rgb(50, 49, 50), /* dark */
+        stop: 0.75 rgb(88,87,88)); /* kindaDark */
     height: 4px;
     border: none;
     border-radius: 2px;
@@ -405,32 +488,37 @@ QSlider::handle:horizontal:pressed {
         stop: 1 rgb(162,161,162)); /* light */
 }
 
+QSlider::sub-page:horizontal {
+    background-color: rgb(42,130,218); /* blue */
+    border-radius: 2px;
+}
+
 QSlider::sub-page:horizontal:disabled {
-    background-color: QLinearGradient(x1: 0, y1: 0, x2: 0, y2: 1,
+    background-color: QLinearGradient(x1: 0, y1: 1, x2: 0, y2: 0,
         stop: 0 rgb(31,30,31), /* veryDark */
-        stop: 0.75 rgb(50, 49, 50));
+        stop: 0.75 rgb(50, 49, 50)); /* dark */
     border-radius: 2px;
 }
 
 QSlider::groove:vertical {
-    background-color: QLinearGradient(x1: 0, y1: 0, x2: 1, y2: 0,
-        stop: 0 rgb(31,30,31), /* veryDark */
-        stop: 0.75 rgb(50, 49, 50));
+    background-color: QLinearGradient(x1: 1, y1: 0, x2: 0, y2: 0,
+        stop: 0 rgb(50, 49, 50), /* dark */
+        stop: 0.75 rgb(88,87,88)); /* kindaDark */
     width: 4px;
     border: none;
     border-radius: 2px;
 }
 
 QSlider::handle:vertical {
-    background-color: QLinearGradient(x1: 0, y1: 0, x2: 1, y2: 0,
+    background-color: QLinearGradient(x1: 1, y1: 0, x2: 0, y2: 0,
         stop: 0 rgb(240,239,240), /* lighter */
         stop: 0.25 rgb(200,199,200),
         stop: 1 rgb(162,161,162)); /* light */
     border: 1px solid rgb(58,57,58); /* dark */
-    border-radius: 4px;
+    border-radius: 3px;
     width: 10px;
     height: 18px;
-    margin: -3px 0; /* handle is placed by default on the contents rect of the groove. Expand outside the groove */
+    margin: 0 -3px; /* handle is placed by default on the contents rect of the groove. Expand outside the groove */
 }
 
 QSlider::handle:vertical:pressed {
@@ -440,10 +528,15 @@ QSlider::handle:vertical:pressed {
         stop: 1 rgb(162,161,162)); /* light */
 }
 
-QSlider::sub-page:vertical:disabled {
-    background-color: QLinearGradient(x1: 0, y1: 0, x2: 1, y2: 0,
+QSlider::add-page:vertical {
+    background-color: rgb(42,130,218); /* blue */
+    border-radius: 2px;
+}
+
+QSlider::add-page:vertical:disabled {
+    background-color: QLinearGradient(x1: 1, y1: 0, x2: 0, y2: 0,
         stop: 0 rgb(31,30,31), /* veryDark */
-        stop: 0.75 rgb(50, 49, 50));
+        stop: 0.75 rgb(50, 49, 50)); /* dark */
     border-radius: 2px;
 }
 
@@ -451,23 +544,22 @@ QSlider::handle:hover {
     background-color: rgb(200,199,200); /* veryLight */
 }
 
-QSlider::sub-page {
-    background-color: rgb(42,130,218); /* blue */
-    border-radius: 2px;
-}
-
 QSlider::handle:disabled {
     background-color: rgb(122,121,122); /* light */
 }
 
-
 /* Volume Control */
 
 VolumeMeter {
-    qproperty-bkColor: rgb(31,30,31); /* veryDark */
-    qproperty-magColor:;
-    qproperty-peakColor:;
-    qproperty-peakHoldColor: rgb(225,224,225); /* veryLight */
+    qproperty-backgroundNominalColor: rgb(38, 127, 38);
+    qproperty-backgroundWarningColor: rgb(127, 127, 38);
+    qproperty-backgroundErrorColor: rgb(127, 38, 38);
+    qproperty-foregroundNominalColor: rgb(76, 255, 76);
+    qproperty-foregroundWarningColor: rgb(255, 255, 76);
+    qproperty-foregroundErrorColor: rgb(255, 76, 76);
+    qproperty-magnitudeColor: rgb(0, 0, 0);
+    qproperty-majorTickColor: rgb(225,224,225); /* veryLight */
+    qproperty-minorTickColor: rgb(122,121,122); /* light */
 }
 
 
@@ -494,6 +586,27 @@ MuteCheckBox::indicator:unchecked {
 
 OBSHotkeyLabel[hotkeyPairHover=true] {
     color: red;
+}
+
+
+/* Group Collapse Checkbox */
+
+SourceTreeSubItemCheckBox {
+    background: transparent;
+    outline: none;
+}
+
+SourceTreeSubItemCheckBox::indicator {
+    width: 10px;
+    height: 10px;
+}
+
+SourceTreeSubItemCheckBox::indicator:checked {
+    image: url(./Dark/expand.png);
+}
+
+SourceTreeSubItemCheckBox::indicator:unchecked {
+    image: url(./Dark/collapse.png);
 }
 
 

@@ -41,8 +41,8 @@ struct noise_gate_data {
 	float held_time;
 };
 
-#define VOL_MIN -96.0f
-#define VOL_MAX 0.0f
+#define VOL_MIN -96.0
+#define VOL_MAX 0.0
 
 static const char *noise_gate_name(void *unused)
 {
@@ -109,7 +109,7 @@ static struct obs_audio_data *noise_gate_filter_audio(void *data,
 {
 	struct noise_gate_data *ng = data;
 
-	float *adata[2] = {(float*)audio->data[0], (float*)audio->data[1]};
+	float **adata = (float**)audio->data;
 	const float close_threshold = ng->close_threshold;
 	const float open_threshold = ng->open_threshold;
 	const float sample_rate_i = ng->sample_rate_i;
@@ -120,9 +120,10 @@ static struct obs_audio_data *noise_gate_filter_audio(void *data,
 	const size_t channels = ng->channels;
 
 	for (size_t i = 0; i < audio->frames; i++) {
-		float cur_level = (channels == 2)
-			? fmaxf(fabsf(adata[0][i]), fabsf(adata[1][i]))
-			: fabsf(adata[0][i]);
+		float cur_level = fabsf(adata[0][i]);
+		for (size_t j = 0; j < channels; j++) {
+			cur_level = fmaxf(cur_level, fabsf(adata[j][i]));
+		}
 
 		if (cur_level > open_threshold && !ng->is_open) {
 			ng->is_open = true;
@@ -154,8 +155,8 @@ static struct obs_audio_data *noise_gate_filter_audio(void *data,
 
 static void noise_gate_defaults(obs_data_t *s)
 {
-	obs_data_set_default_double(s, S_OPEN_THRESHOLD, -26.0f);
-	obs_data_set_default_double(s, S_CLOSE_THRESHOLD, -32.0f);
+	obs_data_set_default_double(s, S_OPEN_THRESHOLD, -26.0);
+	obs_data_set_default_double(s, S_CLOSE_THRESHOLD, -32.0);
 	obs_data_set_default_int   (s, S_ATTACK_TIME, 25);
 	obs_data_set_default_int   (s, S_HOLD_TIME, 200);
 	obs_data_set_default_int   (s, S_RELEASE_TIME, 150);
@@ -166,9 +167,9 @@ static obs_properties_t *noise_gate_properties(void *data)
 	obs_properties_t *ppts = obs_properties_create();
 
 	obs_properties_add_float_slider(ppts, S_CLOSE_THRESHOLD,
-			TEXT_CLOSE_THRESHOLD, VOL_MIN, VOL_MAX, 1.0f);
+			TEXT_CLOSE_THRESHOLD, VOL_MIN, VOL_MAX, 1.0);
 	obs_properties_add_float_slider(ppts, S_OPEN_THRESHOLD,
-			TEXT_OPEN_THRESHOLD, VOL_MIN, VOL_MAX, 1.0f);
+			TEXT_OPEN_THRESHOLD, VOL_MIN, VOL_MAX, 1.0);
 	obs_properties_add_int(ppts, S_ATTACK_TIME, TEXT_ATTACK_TIME,
 			0, 10000, 1);
 	obs_properties_add_int(ppts, S_HOLD_TIME, TEXT_HOLD_TIME,

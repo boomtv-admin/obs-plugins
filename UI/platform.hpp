@@ -43,7 +43,6 @@ void SetAeroEnabled(bool enable);
 void SetProcessPriority(const char *priority);
 void SetWin32DropStyle(QWidget *window);
 bool DisableAudioDucking(bool disable);
-uint64_t CurrentMemoryUsage();
 
 struct RunOnceMutexData;
 
@@ -64,4 +63,5 @@ RunOnceMutex GetRunOnceMutex(bool &already_running);
 
 #ifdef __APPLE__
 void EnableOSXVSync(bool enable);
+void EnableOSXDockIcon(bool enable);
 #endif

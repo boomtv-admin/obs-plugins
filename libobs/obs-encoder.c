@@ -189,8 +189,7 @@ static void add_connection(struct obs_encoder *encoder)
 		struct video_scale_info info = {0};
 		get_video_info(encoder, &info);
 
-		video_output_connect(encoder->media, &info, receive_video,
-			encoder);
+		start_raw_video(encoder->media, &info, receive_video, encoder);
 	}
 
 	set_encoder_active(encoder, true);
@@ -202,8 +201,7 @@ static void remove_connection(struct obs_encoder *encoder)
 		audio_output_disconnect(encoder->media, encoder->mixer_idx,
 				receive_audio, encoder);
 	else
-		video_output_disconnect(encoder->media, receive_video,
-				encoder);
+		stop_raw_video(encoder->media, receive_video, encoder);
 
 	obs_encoder_shutdown(encoder);
 	set_encoder_active(encoder, false);
@@ -293,6 +291,14 @@ obs_data_t *obs_encoder_defaults(const char *id)
 {
 	const struct obs_encoder_info *info = find_encoder(id);
 	return (info) ? get_defaults(info) : NULL;
+}
+
+obs_data_t *obs_encoder_get_defaults(const obs_encoder_t *encoder)
+{
+	if (!obs_encoder_valid(encoder, "obs_encoder_defaults"))
+		return NULL;
+
+	return get_defaults(&encoder->info);
 }
 
 obs_properties_t *obs_get_encoder_properties(const char *id)
@@ -611,7 +617,7 @@ uint32_t obs_encoder_get_height(const obs_encoder_t *encoder)
 	if (!encoder->media)
 		return 0;
 
-	return encoder->scaled_width != 0 ?
+	return encoder->scaled_height != 0 ?
 		encoder->scaled_height :
 		video_output_get_height(encoder->media);
 }
@@ -952,7 +958,6 @@ static bool buffer_audio(struct obs_encoder *encoder, struct audio_data *data)
 		/* use currently buffered audio instead */
 		if (v_start_ts < data->timestamp) {
 			start_from_buffer(encoder, v_start_ts);
-			goto skip_push;
 		}
 
 	} else if (!encoder->start_ts && !encoder->paired_encoder) {
@@ -962,7 +967,6 @@ static bool buffer_audio(struct obs_encoder *encoder, struct audio_data *data)
 fail:
 	push_back_audio(encoder, data, size, offset_size);
 
-skip_push:
 	profile_end(buffer_audio_name);
 	return success;
 }
