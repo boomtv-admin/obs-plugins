@@ -21,7 +21,6 @@
 #include "app-helpers.h"
 #include "cursor-capture.h"
 #include "dc-capture.h"
-#include "cJSON.h"
 #include "nt-stuff.h"
 
 
@@ -40,6 +39,16 @@
 #define SETTING_BORDER_COLOR	 "border_color"
 #define SETTING_BORDER_THICKNESS "border_thickness"
 
+#define SETTING_ANY_FULLSCREEN   "capture_any_fullscreen"
+
+#define SETTING_MODE             "capture_mode"
+#define SETTING_MODE_ANY         "any_fullscreen"
+#define SETTING_MODE_WINDOW      "window"
+#define SETTING_MODE_HOTKEY      "hotkey"
+
+#define HOTKEY_START             "hotkey_start"
+#define HOTKEY_STOP              "hotkey_stop"
+
 #define TEXT_BCU				 obs_module_text("Boom Replay")
 #define TEXT_SLI_COMPATIBILITY   obs_module_text("Compatibility")
 #define TEXT_ALLOW_TRANSPARENCY  obs_module_text("AllowTransparency")
@@ -47,6 +56,9 @@
 #define TEXT_LIMIT_FRAMERATE     obs_module_text("LimitFramerate")
 #define TEXT_BORDER_COLOR		 obs_module_text("Border Color")
 #define TEXT_BORDER_THICKNESS	 obs_module_text("Border Thickness")
+
+#define TEXT_HOTKEY_START        obs_module_text("GameCapture.HotkeyStart")
+#define TEXT_HOTKEY_STOP         obs_module_text("GameCapture.HotkeyStop")
 
 #define DEFAULT_RETRY_INTERVAL 0.25f
 #define ERROR_RETRY_INTERVAL 0.5f
@@ -63,6 +75,12 @@
 
 //===============================================  Structures  ===============================================
 
+enum capture_mode {
+	CAPTURE_MODE_ANY,
+	CAPTURE_MODE_WINDOW,
+	CAPTURE_MODE_HOTKEY
+};
+
 struct bcu_config {
 	char                          *title_first;
 	char                          *title_second;
@@ -71,6 +89,7 @@ struct bcu_config {
 	bool                          allow_transparency : 1;
 	bool                          limit_framerate : 1;
 	uint32_t					  border_color;
+	enum capture_mode             mode;
 	int							  border_thickness;
 };
 
@@ -133,6 +152,7 @@ struct bcu {
 	float                         cursor_check_time;
 	bool                          cursor_hidden;
 
+	obs_hotkey_pair_id            hotkey_pair;
 	volatile long                 hotkey_window;
 	volatile bool                 deactivate_hook;
 	volatile bool                 activate_hook_now;
@@ -305,195 +325,6 @@ bool bcu_find_id_helper(void *data, size_t idx, obs_hotkey_t *hotkey)
 	return true;
 }
 
-
-//Get current scene
-struct obs_scene* bcu_get_scene(void *data)
-{
-	blog(LOG_WARNING, "bcu_get_scene");
-
-	if (bcu_assert("bcu_get_scene", data) == false) return NULL;
-
-	struct bcu *gc = data;
-	struct obs_source * scene_src;
-	struct obs_scene * scene;
-	char scene_name[256];
-
-	if (gc->dirpath)
-	{
-		blog(LOG_WARNING, "		gc->dirpath = %s", gc->dirpath);
-
-		char *text = bcu_get_json_data_from_file(gc->dirpath);
-		blog(LOG_WARNING, "		text = %s", text);
-		if (!text) return NULL;
-
-		cJSON *json = cJSON_Parse(text);
-		if (json)
-		{
-			json = json->child;
-
-			while (json)
-			{
-				if (strcmp(json->string, "current_scene") == 0)
-				{
-					strcpy(scene_name, json->valuestring);
-					break;
-				}
-				json = json->next;
-			}
-
-			cJSON_Delete(json);
-		}
-		free(text);
-	}
-
-	blog(LOG_WARNING, "		scene_name = %s", scene_name);
-	scene_src = obs_get_source_by_name(scene_name);
-	if (!scene_src) return NULL;
-
-	scene = obs_scene_from_source(scene_src);
-	blog(LOG_WARNING, "		get scene from source");
-
-	obs_source_release(scene_src);
-	blog(LOG_WARNING, "		release scene_src");
-
-	return scene;
-}
-
-
-//Get scene item
-struct obs_scene_item* bcu_get_scene_item(void *data)
-{
-	blog(LOG_WARNING, "bcu_get_scene_item");
-
-	if (bcu_assert("bcu_get_scene_item", data) == false) return NULL;
-
-	struct bcu *gc = data;
-	struct obs_scene * scene = bcu_get_scene(data);
-	struct obs_scene_item * item;
-
-	if (scene) item = scene->first_item;
-	else return NULL;
-
-	while (item)
-	{
-		if ((item->source) && (gc->source))
-		{
-			if (strcmp(item->source->context.name, gc->source->context.name) == 0)
-			{
-				break;
-			}
-		}
-		item = item->next;
-	}
-
-	return item;
-}
-
-
-//Set default position
-void bcu_set_default_postition(void *data)
-{
-	blog(LOG_WARNING, "bcu_set_default_postition");
-
-	if (bcu_assert("bcu_set_default_postition", data) == false) return;
-
-	struct bcu *gc = data;
-	struct obs_scene_item *item = bcu_get_scene_item(data);
-	RECT rect;
-
-	if (gc->ovi && item)
-	{
-		GetClientRect(gc->window, &rect);
-		struct vec2 *pos = bzalloc(sizeof(struct vec2));
-		struct vec2 *scale = bzalloc(sizeof(struct vec2));
-
-
-		/*pos->x = gc->ovi->base_width - width * item->scale.x;
-		pos->y = gc->ovi->base_height - height  * item->scale.y;*/
-		scale->x = 1;
-		scale->y = 1;
-		obs_sceneitem_set_scale(item, scale);
-
-		if (!gc->use2D)
-		{
-			uint32_t width;
-			uint32_t height;
-			if (gc->global_hook_info)
-			{
-				width = gc->global_hook_info->base_cx;
-				height = gc->global_hook_info->base_cy;
-			}
-			else
-			{
-				width = gc->cx;
-				height = gc->cy;
-			}
-			pos->x = gc->ovi->base_width - width;
-			pos->y = gc->ovi->base_height - height;
-			//pos->x = 960;
-			//pos->y = 540;
-		}
-		else
-		{
-			pos->x = gc->ovi->base_width - rect.right;
-			pos->y = gc->ovi->base_height - rect.bottom;
-		}
-		obs_sceneitem_set_pos(item, pos);
-		bfree(pos);
-		bfree(scale);
-	}
-
-	item = NULL;
-}
-
-
-//Reset dimensions
-void bcu_set_scale(void *data)
-{
-	blog(LOG_WARNING, "bcu_set_scale");
-
-	if (bcu_assert("bcu_set_scale", data) == false) return;
-
-	struct bcu *gc = data;
-	struct obs_scene_item * item = bcu_get_scene_item(data);
-
-
-	if (item)
-	{
-		struct vec2 *pos = bzalloc(sizeof(struct vec2));
-		struct vec2 *scale = bzalloc(sizeof(struct vec2));
-
-		if (gc->last_rect.right > 0 && gc->last_rect.bottom > 0)
-		{
-			if (!gc->use2D)
-			{
-				uint32_t width;
-				if (gc->global_hook_info)
-				{
-					width = gc->global_hook_info->base_cx;
-				}
-				else
-				{
-					width = gc->cx;
-				}
-				scale->x = ((float)gc->last_rect.right / width) * item->scale.x;
-				scale->y = scale->x;
-			}
-			else
-			{
-				RECT rect;
-				GetClientRect(gc->window, &rect);
-				scale->x = ((float)gc->last_rect.right / rect.right) * item->scale.x;
-				scale->y = scale->x;
-			}
-			obs_sceneitem_set_scale(item, scale);
-		}
-	}
-
-	item = NULL;
-}
-
-
 //Hotkey positioning
 static bool bcu_hotkey_pos(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotkey, bool pressed)
 {
@@ -515,74 +346,6 @@ static bool bcu_hotkey_pos(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotk
 	}
 
 	return false;
-}
-
-
-//Init
-void bcu_init(void *data)
-{
-	blog(LOG_WARNING, "bcu_init");
-
-	if (bcu_assert("bcu_init", data) == false) return;
-
-	//MessageBox(NULL, (LPCWSTR)L"BoomApp is not running. Please start BoomApp before start playing game!", (LPCWSTR)L"Warning", MB_SYSTEMMODAL | MB_OK | MB_ICONWARNING);
-
-	// Find BoomApp window
-	char* title = bzalloc(255 * sizeof(char));
-	strcpy(title, "Boom Replay");
-	if (!find_window(INCLUDE_MINIMIZED, WINDOW_PRIORITY_TITLE, "", title, ""))
-	{
-		MessageBoxA(NULL, "Boom Replay is not running. Please start Boom Replay before OBS!", "Warning", MB_SYSTEMMODAL | MB_OK | MB_ICONWARNING);
-	}
-	bfree(title);
-
-	struct bcu *gc = data;
-	struct obs_scene * scene = bcu_get_scene(data);
-	struct obs_scene_item * item = bcu_get_scene_item(data);
-
-	if (bcu_assert("bcu_init", scene) == false) return;
-	if (bcu_assert("bcu_init", item) == false) return;
-
-	//Set unvisible
-	//obs_sceneitem_set_visible(item, false);
-
-
-	//Register toggle position hotkey function
-	char id[256] = "";
-	char name[256] = "BCU.reset_position.";
-	char desc[256] = "Reset ";
-
-	strcat(id, gc->source->context.name);
-	strcat(name, id);
-	strcat(desc, id);
-
-	gc->toggle_position = obs_hotkey_register_source(scene->source, name, desc, bcu_hotkey_pos, gc);
-
-
-	//Set hotkeys to turn visibility
-	obs_key_combination_t *keycomb_show_hide = bzalloc(sizeof(obs_key_combination_t));
-	keycomb_show_hide->key = OBS_KEY_F7;
-	keycomb_show_hide->modifiers = 0;
-
-	obs_key_combination_t *keycomb_reset = bzalloc(sizeof(obs_key_combination_t));
-	keycomb_reset->key = OBS_KEY_F8;
-	keycomb_reset->modifiers = 0;
-
-	struct bcu_hotkey_helper *aa = bzalloc(sizeof(struct bcu_hotkey_helper));
-
-	aa->scene_item = item;
-	aa->show_id = -1;
-	aa->hide_id = -1;
-	aa->reset_id = -1;
-
-	obs_enum_hotkeys(bcu_find_id_helper, aa);
-
-	obs_hotkey_load_bindings(aa->show_id, keycomb_show_hide, 1);
-	obs_hotkey_load_bindings(aa->hide_id, keycomb_show_hide, 1);
-	obs_hotkey_load_bindings(aa->reset_id, keycomb_reset, 1);
-
-	item = NULL;
-	scene = NULL;
 }
 
 
@@ -782,6 +545,34 @@ static inline bool capture_needs_reset(struct bcu_config *cfg1, struct bcu_confi
 	return false;
 }
 
+static bool hotkey_start(void *data, obs_hotkey_pair_id id,
+		obs_hotkey_t *hotkey, bool pressed)
+{
+	struct bcu *gc = data;
+
+	if (pressed && gc->config.mode == CAPTURE_MODE_HOTKEY) {
+		info("Activate hotkey pressed");
+		os_atomic_set_long(&gc->hotkey_window,
+				(long)(uintptr_t)GetForegroundWindow());
+		os_atomic_set_bool(&gc->deactivate_hook, true);
+		os_atomic_set_bool(&gc->activate_hook_now, true);
+	}
+
+	return true;
+}
+
+static bool hotkey_stop(void *data, obs_hotkey_pair_id id,
+		obs_hotkey_t *hotkey, bool pressed)
+{
+	struct bcu *gc = data;
+
+	if (pressed && gc->config.mode == CAPTURE_MODE_HOTKEY) {
+		info("Deactivate hotkey pressed");
+		os_atomic_set_bool(&gc->deactivate_hook, true);
+	}
+
+	return true;
+}
 
 // Module update
 static void bcu_update(void *data, obs_data_t *settings)
@@ -838,6 +629,11 @@ static void *bcu_create(obs_data_t *settings, obs_source_t *source)
 	gc->source = source;
 	gc->initial_config = true;
 	gc->retry_interval = DEFAULT_RETRY_INTERVAL;
+	gc->hotkey_pair = obs_hotkey_pair_register_source(
+			gc->source,
+			HOTKEY_START, TEXT_HOTKEY_START,
+			HOTKEY_STOP,  TEXT_HOTKEY_STOP,
+			hotkey_start, hotkey_stop, gc, gc);
 
 	gc->use2D = false;
 	gc->ovi = bzalloc(sizeof(struct obs_video_info));
@@ -905,7 +701,7 @@ static bool check_file_integrity(struct bcu *gc, const char *file,
 	wchar_t *w_file = NULL;
 
 	if (!file || !*file) {
-		warn("Game capture %s not found." STOP_BEING_BAD, name);
+		warn("Boom capture %s not found." STOP_BEING_BAD, name);
 		return false;
 	}
 
@@ -1562,7 +1358,7 @@ static inline uint32_t convert_6_to_8bit(uint16_t val)
 	return (uint32_t)((double)(val & 0x3F) * (255.0 / 63.0));
 }
 
-static void copy_b5g6r5_tex(struct game_capture *gc, int cur_texture,
+static void copy_b5g6r5_tex(struct bcu *gc, int cur_texture,
 		uint8_t *data, uint32_t pitch)
 {
 	uint8_t *input = gc->texture_buffers[cur_texture];
@@ -1636,7 +1432,7 @@ static void copy_b5g6r5_tex(struct game_capture *gc, int cur_texture,
 	}
 }
 
-static void copy_b5g5r5a1_tex(struct game_capture *gc, int cur_texture,
+static void copy_b5g5r5a1_tex(struct bcu *gc, int cur_texture,
 		uint8_t *data, uint32_t pitch)
 {
 	uint8_t *input = gc->texture_buffers[cur_texture];

@@ -1,6 +1,7 @@
 project(boom-capture)
 
 set(boom-capture_HEADERS
+	nt-stuff.h
 	obfuscate.h
 	hook-helpers.h
 	inject-library.h
@@ -18,7 +19,6 @@ set(boom-capture_SOURCES
 	app-helpers.c
 	load-graphics-offsets.c
 	plugin-main.c
-	vr-window-capture.c
 	boom-universal.c
 	dc-capture.c)
 
