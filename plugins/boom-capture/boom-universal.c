@@ -824,6 +824,7 @@ static inline bool init_texture_mutexes(struct bcu *gc)
 			warn("failed to open texture mutexes: %lu",
 					GetLastError());
 		}
+
 		return false;
 	}
 
